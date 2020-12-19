@@ -1,20 +1,19 @@
 #!/usr/bin/env python
 
-"""Describe the script here"""
+"""Script for making haplotypes.  Intended to be merged into main pastrami script"""
 
-__author__ = "Lavanya Rishishwar"
-__copyright__ = "Copyright 2020, Lavanya Rishishwar"
-__credits__ = ["Lavanya Rishishwar"]
+__author__ = "Andrew Conley, Lavanya Rishishwar"
+__copyright__ = "Copyright 2020, Andrew Conley, Lavanya Rishishwar"
+__credits__ = ["Andrew Conely", "Lavanya Rishishwar"]
 __license__ = "GPL"
 __version__ = "0.1"
-__maintainer__ = "Lavanya Rishishwar"
-__email__ = "lavanyarishishwar@gmail.com"
+__maintainer__ = "Andrew Conley, Lavanya Rishishwar"
+__email__ = "aconley@ihrc.com; lrishishwar@ihrc.com"
 __status__ = "Development"
 
 from argparse import ArgumentParser, HelpFormatter
 import sys
 import os
-import pandas as pd
 import pathos.multiprocessing as mp
 
 PROGRAM_NAME = "hapmake.py"
@@ -35,7 +34,7 @@ class HapMake:
     def __init__(self, opts):
         self.min_snps = opts.min_snps
         self.max_snps = opts.max_snps
-        self.max_rate = opts.min_snps
+        self.max_rate = opts.max_rate
         self.map_dir = opts.map_dir
         self.hap_file = opts.hap_file
         self.threads = opts.threads
@@ -49,7 +48,7 @@ class HapMake:
         function()
 
     def process_hapmap_file(self, chrom: int):
-        haplotypes = []
+        haplotypes = ""
         map_data = []
         with open(os.path.join(self.map_dir, f"chr{chrom}.map"), "r") as f:
             for line in f:
@@ -79,17 +78,16 @@ class HapMake:
 
             # If snps isn't False, then save the range of the window
             if snps is True:
-                haplotypes.append([str(chrom), str(left_snp - 1), str(right_snp - 1),
-                                   str(map_data[right_snp - 2][1] - map_data[left_snp][1])])
+                haplotypes += f"{chrom}\t{left_snp}\t{right_snp}\t{map_data[right_snp - 2][1] - map_data[left_snp][1]}\n"
+                snps = False
+                left_snp = right_snp
         return haplotypes
 
     def make_haplotypes(self):
         pool = mp.Pool(processes=self.threads)
         results = pool.map(self.process_hapmap_file, range(1, 23))
         with open(self.hap_file, "w") as f:
-            for chrom_hap in results:
-                for row in chrom_hap:
-                    f.write("\t".join(row) + "\n")
+            f.write("".join(results) + "\n")
 
 
 if __name__ == '__main__':

@@ -15,6 +15,7 @@ from argparse import ArgumentParser, HelpFormatter
 import sys
 import os
 import pathos.multiprocessing as mp
+import logging
 
 PROGRAM_NAME = "hapmake.py"
 
@@ -38,7 +39,10 @@ class HapMake:
         self.map_dir = opts.map_dir
         self.hap_file = opts.hap_file
         self.threads = opts.threads
+        self.log_file = opts.log_file
+        self.verbosity = opts.verbosity
         self.errors = []
+        self.init_logger()
 
     def validate_options(self):
         pass
@@ -48,12 +52,14 @@ class HapMake:
         function()
 
     def process_hapmap_file(self, chrom: int):
+        logging.info(f"[hapmake|chr{chrom}] Started processing")
         haplotypes = ""
         map_data = []
         with open(os.path.join(self.map_dir, f"chr{chrom}.map"), "r") as f:
             for line in f:
                 (position, cmorgan, snp) = line.rstrip().split("\t")
                 map_data.append([int(position), float(cmorgan), snp])
+        logging.info(f"[hapmake|chr{chrom}] File read")
 
         left_snp = 0
         right_snp = 0
@@ -81,13 +87,43 @@ class HapMake:
                 haplotypes += f"{chrom}\t{left_snp}\t{right_snp}\t{map_data[right_snp - 2][1] - map_data[left_snp][1]}\n"
                 snps = False
                 left_snp = right_snp
+        logging.info(f"[hapmake|chr{chrom}] All haplotypes discovered")
         return haplotypes
 
     def make_haplotypes(self):
+        logging.info(f"[hapmake|chrAll] Starting pool for processing")
         pool = mp.Pool(processes=self.threads)
         results = pool.map(self.process_hapmap_file, range(1, 23))
         with open(self.hap_file, "w") as f:
             f.write("".join(results) + "\n")
+        logging.info(f"[hapmake|chrAll] Files written")
+
+    def init_logger(self):
+        """Configures the logging for printing
+        Returns
+        -------
+        None
+            Logger behavior is set based on the Inputs variable
+        """
+        try:
+            logging.basicConfig(filename=self.log_file, filemode="w", level=logging.DEBUG,
+                                format=f"[%(asctime)s] %(message)s",
+                                datefmt="%m-%d-%Y %I:%M:%S %p")
+        except FileNotFoundError:
+            print(
+                f"The supplied location for the log file '{self.log_file}' doesn't exist. Please check if the location exists.")
+            sys.exit(1)
+        except IOError:
+            print(
+                f"I don't seem to have access to make the log file. Are the permissions correct or is there a directory with the same name?")
+            sys.exit(1)
+
+        if self.verbosity:
+            console = logging.StreamHandler()
+            console.setLevel(logging.INFO)
+            formatter = logging.Formatter(fmt=f"[%(asctime)s] %(message)s", datefmt="%m-%d-%Y %I:%M:%S %p")
+            console.setFormatter(formatter)
+            logging.getLogger().addHandler(console)
 
 
 if __name__ == '__main__':
@@ -121,11 +157,16 @@ if __name__ == '__main__':
     hapmake_input_group.add_argument('--max-rate', required=False, default=0.3, metavar='MaxRate', type=float,
                                      help='Maximum recombination rate (default: %(default)s)',
                                      dest="max_rate")
-    hapmake_input_group.add_argument('--threads', required=False, default=4, metavar='Threads', type=int,
+    hapmake_input_group.add_argument('--threads', "-t", required=False, default=4, metavar='Threads', type=int,
                                      help='Number of concurrent threads (default: %(default)s)', dest="threads")
+    hapmake_input_group.add_argument('--verbose', "-v", required=False, action="store_true",
+                                     help='Print program progress information on screen', dest="verbosity")
     hapmake_output_group = hapmake_parser.add_argument_group('Output options')
-    hapmake_output_group.add_argument('--hap-file', required=False, default=None, metavar='out.haplotypes', type=str,
-                                     help='Output file containing haplotypes (default: %(default)s)', dest="hap_file")
+    hapmake_output_group.add_argument('--hap-file', required=False, default="out.haplotypes", metavar='out.haplotypes',
+                                      type=str,
+                                      help='Output file containing haplotypes (default: %(default)s)', dest="hap_file")
+    hapmake_output_group.add_argument('--log-file', required=False, default="run.log", metavar='run.log', type=str,
+                                      help='File containing log information (default: %(default)s)', dest="log_file")
 
     options, unknown_arguments = parser.parse_known_args()
 

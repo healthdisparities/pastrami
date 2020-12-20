@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """Script for making haplotypes.  Intended to be merged into main pastrami script"""
 
@@ -123,8 +123,8 @@ if __name__ == '__main__':
                                      dest="max_rate")
     hapmake_input_group.add_argument('--threads', required=False, default=4, metavar='Threads', type=int,
                                      help='Number of concurrent threads (default: %(default)s)', dest="threads")
-    hapmake_input_group = hapmake_parser.add_argument_group('Output options')
-    hapmake_input_group.add_argument('--hap-file', required=False, default=None, metavar='out.haplotypes', type=str,
+    hapmake_output_group = hapmake_parser.add_argument_group('Output options')
+    hapmake_output_group.add_argument('--hap-file', required=False, default=None, metavar='out.haplotypes', type=str,
                                      help='Output file containing haplotypes (default: %(default)s)', dest="hap_file")
 
     options, unknown_arguments = parser.parse_known_args()

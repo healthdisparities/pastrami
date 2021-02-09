@@ -11,14 +11,17 @@ __maintainer__ = "Andrew Conley, Lavanya Rishishwar"
 __email__ = "aconley@ihrc.com; lrishishwar@ihrc.com"
 __status__ = "Development"
 
-from argparse import ArgumentParser, HelpFormatter
-import sys
-import statistics
+import logging
+import numpy as np
+import os
 import pathos.multiprocessing as mp
 import re
-import pandas as pd
-import numpy as np
-import logging
+import random
+import statistics
+import string
+import subprocess
+import sys
+from argparse import ArgumentParser, HelpFormatter
 from scipy.optimize import minimize
 
 PROGRAM_NAME = "aggregate.py"
@@ -38,6 +41,13 @@ class Colors:
 class Aggregate:
     debug = True
     optim_step_size = 0.0001
+    error_threshold = 1e-5
+    optim_iterations = 10
+    tolerance = 1e-8
+    ancestry_fraction_postfix = "_fractions.Q"
+    ancestry_painting_postfix = "_paintings.Q"
+    pop_estimates_postfix = "_estimates.Q"
+    finegrain_estimates_postfix = "_fine_grain_estimates.Q"
 
     def __init__(self, opts):
         self.ancestry_infile = opts.ancestry_infile
@@ -48,7 +58,7 @@ class Aggregate:
         self.verbosity = opts.verbosity
         self.log_file = opts.log_file
 
-        self.pop_group_map = {}
+        self.ref_pop_group_map = {}
         self.ind_pop_map = {}
         self.pop_ind_map = {}  # reverse map of ind_pop_map, sacrificing memory for speed later on
         self.reference_individuals = {}
@@ -64,6 +74,7 @@ class Aggregate:
         self.init_logger()
 
     def validate_options(self):
+        # TODO: Check for dependencies
         pass
 
     def go(self):
@@ -74,39 +85,72 @@ class Aggregate:
         self.set_pop_group_map()
         self.process_fam_file()
         self.process_ancestry_fractions()
-        self.painting_vector_median()
-        self.get_fine_grain_estimates()
         self.print_ancestry_fractions()
+
+        self.painting_vector_median()
         self.print_ancestry_paintings()
+
+        self.get_fine_grain_estimates_py3()
+        # self.get_fine_grain_estimates_r()
         self.print_fine_grain_estimates()
         self.print_population_level_estimates()
 
     def set_pop_group_map(self):
+        """Reads in the pop x group file of the format:
+        #Population	Group
+        GWD	Western
+        MSL	Western
+        Yacouba	Western
+        Ahizi	Western
+        Fon	Nigerian
+
+        the two columns are tab separated. The file is read and stored in self.pop_group_map dictionary.
+
+        Returns
+        -------
+        None
+        Sets self.pop_group_map values and moves on
+        """
         logging.info("Reading in population grouping file")
         with open(self.pop_group_file, "r") as f:
             for line in f:
+                # ignore comment line
                 if line.startswith("#"):
                     continue
                 else:
+                    # TODO: implement check for at least two columns in the input file
                     pop, group = line.rstrip().split("\t")
-                    self.pop_group_map[pop] = group
+                    self.ref_pop_group_map[pop] = group
         logging.info("Population grouping file read")
 
     def process_fam_file(self):
+        """Read in and save the FAM file in the self.ind_pop_map dictionary
+
+        Returns
+        -------
+        None
+        Sets self.ind_pop_map values and moves on
+        """
         logging.info("Processing FAM file")
+        # variables used for logging purposes only
         ref_ind_count = 0
         line_number = 0
         with open(self.fam_infile, "r") as f:
             for line in f:
+                # ignore comment lines
                 if line.startswith("#"):
                     continue
                 else:
+                    # TODO: ensure that the input file has at least 3 columns
                     pop, ind, extra = line.rstrip().split("\t", 2)
-                    ind = re.sub(r"\.[12]", "", ind)
+                    ind = re.sub(r"\.[12]$", "", ind)
                     self.ind_pop_map[ind] = pop
-                    if pop in self.pop_group_map:
-                        self.reference_individuals[ind] = True
-                        ref_ind_count += 1
+                    if pop in self.ref_pop_group_map:
+                        if ind not in self.reference_individuals:
+                            self.reference_individuals[ind] = True
+                            ref_ind_count += 1
+                        else:
+                            continue
                     line_number += 1
         logging.info(f"FAM file read, read {line_number} lines and found {ref_ind_count} reference individuals")
 
@@ -136,46 +180,48 @@ class Aggregate:
 
             # Column filter to retain only reference populations
             for pop_index in range(len(full_header)):
-                if full_header[pop_index] in self.pop_group_map:
+                if full_header[pop_index] in self.ref_pop_group_map:
                     self.af_header.append(full_header[pop_index])
                     indices.append(pop_index + 1)  # +1 for individual id
             column_mins = [1] * len(self.af_header)
             logging.info(f"Found {len(self.af_header)} reference populations in the ancestry fraction file")
 
             # Iterate through the rest of the lines
-            ind_seen = {}
             for line in f:
                 columns = line.rstrip().split("\t")
                 ind_id = re.sub(r"\.[12]", "", columns[0])
 
+                # # Row filter to retain individuals that are in the FAM file
+                # if ind_id not in self.ind_pop_map:
+                #     continue
+
                 # Column filter to retain only reference populations
                 fractions = [float(columns[x]) for x in indices]
 
-                # Row filter to retain only reference individuals
-                if ind_id not in self.reference_individuals:
-                    continue
-
                 # Populate the pop_ind_map dictionary of lists
+                # TODO: Catch cases when ind_id is not defined in the FAM file
                 this_pop = self.ind_pop_map[ind_id]
                 if this_pop not in self.pop_ind_map:
                     self.pop_ind_map[this_pop] = []
-                if ind_id not in ind_seen:
                     self.pop_ind_map[this_pop].append(ind_id)
-                    ind_seen[ind_id] = 1
-
-                # Average the ancestry fractions and identify column minimums
-                if ind_id in self.ancestry_fractions:
-                    # @LR: I am assuming that we will only see an individual
+                    self.ancestry_fractions[ind_id] = fractions
+                elif ind_id not in self.ancestry_fractions:
+                    self.pop_ind_map[this_pop].append(ind_id)
+                    self.ancestry_fractions[ind_id] = fractions
+                else:
+                    # Average the ancestry fractions and identify column minimums
+                    # LR: I am assuming that we will only see an individual
                     # twice -> dictated by the regex and if condition above
                     for i in range(len(fractions)):
                         self.ancestry_fractions[ind_id][i] = (self.ancestry_fractions[ind_id][i] +
                                                               fractions[i]) / 2
-                        if column_mins[i] > self.ancestry_fractions[ind_id][i]:
-                            column_mins[i] = self.ancestry_fractions[ind_id][i]
-                else:
-                    self.ancestry_fractions[ind_id] = fractions
+                        if ind_id in self.reference_individuals:
+                            if column_mins[i] > self.ancestry_fractions[ind_id][i]:
+                                column_mins[i] = self.ancestry_fractions[ind_id][i]
 
         logging.info(f"Found {len(self.ancestry_fractions.keys())} reference individuals in the ancestry fraction file")
+
+        print(column_mins)
 
         # Scale factors by column minimum, followed by row sum
         logging.info("File read, scaling the fractions")
@@ -191,12 +237,6 @@ class Aggregate:
             for i in range(len(self.af_header)):
                 self.ancestry_fractions[ind_id][i] = self.ancestry_fractions[ind_id][i] / row_sum
         logging.info("Ancestry fractions processed")
-
-    def process_ancestry_fractions_pdway(self):
-        logging.info("Reading in the Pastrami ancestry fractions")
-        self.ancestry_fractions = pd.read_table(self.ancestry_infile, index_col=0, header=0, sep="\t")
-        self.ancestry_fractions.aggregate()
-        logging.info("Ancestry fraction read")
 
     def shrinkage(self, i_was_in_the_pool=0.1) -> None:
         for ind_id in self.ancestry_fractions:
@@ -236,7 +276,7 @@ class Aggregate:
         None. Sets the value of painting vectors.
         """
         logging.info(f"Beginning calculation of median painting vectors")
-        populations = sorted(self.pop_group_map.keys())
+        populations = sorted(self.ref_pop_group_map.keys())
         logging.info(f"{len(populations)} populations to process")
         self.painting_vectors = {}
 
@@ -350,9 +390,161 @@ class Aggregate:
         par = np.array([1 / len(self.painting_vectors)] * len(self.painting_vectors))
         data = np.array(self.ancestry_fractions[row])
         this_estimate = minimize(fun=self.regularized_rss, args=data, x0=par, method='L-BFGS-B',
-                                 bounds=[(0, 1) for _ in range(len(par))], options={'eps': Aggregate.optim_step_size})
+                                 bounds=[(0, 1) for _ in range(len(par))],
+                                 options={'eps': Aggregate.optim_step_size, 'maxiter': Aggregate.optim_iterations},
+                                 tol=Aggregate.tolerance)
+        # Code to assess if shuffling the parameters has any effect on the output
+        # It didn't change the results. Python's scipy.optimize.minimize is constantly getting stuck
+        # at a local minima
+        # for i in range(Aggregate.optim_iterations):
+        #     if this_estimate["fun"] <= Aggregate.error_threshold:
+        #         break
+        #     par = this_estimate["x"].copy()
+        #     random.shuffle(par)
+        #     new_estimate = minimize(fun=self.regularized_rss, args=data, x0=par, method='L-BFGS-B',
+        #                             bounds=[(0, 1) for _ in range(len(par))],
+        #                             options={'eps': Aggregate.optim_step_size})
+        #     if new_estimate["fun"] < this_estimate["fun"]:
+        #         this_estimate = new_estimate
+
         logging.info(f"Optimized penalty for {row}: " + str(this_estimate["fun"]))
         return this_estimate["x"]
+
+    def get_fine_grain_estimates_py3(self):
+        """Calculates fine grain estimates of individuals listed within ancestry_fractions dictionary
+
+        Returns
+        -------
+        None.
+            Sets self.fine_grain_estimates to the fine grain estimates calculated
+        """
+        logging.info(f"Beginning calculation of NNLS estimates")
+        pool = mp.Pool(processes=self.threads)
+        results = pool.map(self.regularize_this_row, self.ancestry_fractions.keys())
+        logging.info(f"Finished all NNLS estimate calculations")
+
+        ind_ids = list(self.ancestry_fractions.keys())
+        for i in range(len(ind_ids)):
+            this_sum = sum(results[i])
+            # TODO: Investigate why sum is sometimes 0
+            if this_sum == 0:
+                this_sum = 1
+            for j in range(len(results[i])):
+                results[i][j] = results[i][j] / this_sum
+            self.fine_grain_estimates[ind_ids[i]] = results[i]
+
+    def regularize_this_r(self, row_ids: list) -> dict:
+        """Runs the minimize function on a single row from the ancestry fractions
+
+        Parameters
+        ----------
+        row_ids : list
+            Row_ids of whose ancestry fractions are to be processed.
+
+        Returns
+        -------
+        Dict
+            A dictionary containing ind_id to optimized values
+        """
+        logging.info(f"Optimizing queued for {len(row_ids)} entries")
+        this_estimate = {}
+        temp_name = "pastrami." + ''.join(random.choice(string.ascii_letters) for _ in range(10))
+        temp_in = temp_name + ".in.tmp"
+        temp_out = temp_name + ".out.tmp"
+        temp_script = temp_name + ".r"
+
+        with open(temp_in, "w") as f:
+            f.write("Ind\t" + "\t".join(self.af_header) + "\n")
+            for ind_id in row_ids:
+                f.write(f"{ind_id}\t" + "\t".join([str(x) for x in self.ancestry_fractions[ind_id]]) + "\n")
+
+        r_script = """
+#!/usr/bin/Rscript
+
+regularized_rss = function(data, par) {
+    ## Data is the observed copying rates
+    ## Parameters are the estimated fractions
+    ## Find the difference between predicted and observed copying rates, and regularize
+    predicted = t(reference_means) %*% cbind(par)
+    error = sum((data - predicted)**2)
+    penalty = error * (sum(par > 0) - 1) * .25
+
+    return(error + penalty)
+}
+
+ancestry_fractions = as.matrix(read.table('""" + temp_in + """', row.names = 1, 
+                           header = TRUE, stringsAsFactors = FALSE))
+reference_means = as.matrix(read.table('""" + self.out_prefix + Aggregate.ancestry_painting_postfix + """', row.names = 1, 
+                                      header = TRUE, stringsAsFactors = FALSE))
+
+regularized_estimates = apply(ancestry_fractions, MAR = 1, 
+                             FUN = function(i) optim(par = rep(1/nrow(reference_means), nrow(reference_means)), 
+                                                     fn = regularized_rss, lower = rep(0, 5), upper = rep(1, 5), 
+                                                     data = i, method = 'L-BFGS-B')$par)
+rownames(regularized_estimates) = rownames(reference_means)
+regularized_estimates = t(regularized_estimates)
+
+write.table(x=regularized_estimates, file='""" + temp_out + """', col.names = TRUE, row.names = TRUE, 
+            sep="\\t", quote = FALSE)
+"""
+        with open(temp_script, "w") as f:
+            f.write(r_script)
+        subprocess.call(["Rscript", temp_script])
+
+        with open(temp_out, "r") as f:
+            # this_header = f.readline().rstrip().split("\t")
+            f.readline()
+
+            for line in f:
+                values = line.rstrip().split("\t")
+                this_estimate[values[0]] = []
+                this_estimate[values[0]] = [float(x) for x in values[1:]]
+
+        os.remove(temp_in)
+        os.remove(temp_out)
+        os.remove(temp_script)
+
+        logging.info(f"Queue completed for {len(row_ids)} entries.")
+
+        return this_estimate
+
+    def get_fine_grain_estimates_r(self):
+        """Calculates fine grain estimates of individuals listed within ancestry_fractions dictionary
+
+        Returns
+        -------
+        None.
+            Sets self.fine_grain_estimates to the fine grain estimates calculated
+        """
+        logging.info(f"Beginning calculation of NNLS estimates")
+
+        queues = []
+
+        individuals = list(self.ancestry_fractions.keys())
+        chunks = round(len(individuals) / self.threads)
+        current_chunk = 0
+
+        while current_chunk < len(individuals):
+            chunk_end = current_chunk + chunks
+            if chunk_end > len(individuals):
+                chunk_end = len(individuals)
+            queues.append(individuals[current_chunk:chunk_end])
+            current_chunk = chunk_end
+
+        pool = mp.Pool(processes=self.threads)
+        results = pool.map(self.regularize_this_r, queues)
+        logging.info(f"Finished all NNLS estimate calculations")
+
+        for row_dict in results:
+            for ind_id in row_dict:
+                results = row_dict[ind_id]
+                this_sum = sum(results)
+                # TODO: Inspect why some results come back as 0 for all estimates
+                if this_sum == 0:
+                    this_sum = 1
+                for j in range(len(results)):
+                    results[j] = results[j] / this_sum
+                self.fine_grain_estimates[ind_id] = results
 
     def print_ancestry_fractions(self):
         """Prints ancestry fractions to a file
@@ -362,7 +554,7 @@ class Aggregate:
         None.
             Prints the ancestry fractions to {out_prefix}_fractions.Q file
         """
-        outfile = self.out_prefix + "_fractions.Q"
+        outfile = self.out_prefix + Aggregate.ancestry_fraction_postfix
         logging.info(f"Writing ancestry fractions to {outfile}")
         with open(outfile, "w") as f:
             f.write("Ind\t" + "\t".join(self.af_header) + "\n")
@@ -378,30 +570,13 @@ class Aggregate:
         None.
             Prints the ancestry fractions to {out_prefix}_paintings.Q file
         """
-        outfile = self.out_prefix + "_paintings.Q"
+        outfile = self.out_prefix + Aggregate.ancestry_painting_postfix
         logging.info(f"Writing ancestry paintings to {outfile}")
         with open(outfile, "w") as f:
             f.write("Pop\t" + "\t".join(self.af_header) + "\n")
             for pop in self.painting_vectors:
                 f.write(pop + "\t" + "\t".join([str(i) for i in self.painting_vectors[pop]]) + "\n")
         logging.info(f"{outfile} successfully created")
-
-    def get_fine_grain_estimates(self):
-        """Calculates fine grain estimates of individuals listed within ancestry_fractions dictionary
-
-        Returns
-        -------
-        None.
-            Sets self.fine_grain_estimates to the fine grain estimates calculated
-        """
-        logging.info(f"Beginning calculation of NNLS estimates")
-        pool = mp.Pool(processes=self.threads)
-        results = pool.map(self.regularize_this_row, self.ancestry_fractions.keys())
-        logging.info(f"Finished all NNLS estimate calculations")
-
-        ind_ids = list(self.ancestry_fractions.keys())
-        for i in range(len(ind_ids)):
-            self.fine_grain_estimates[ind_ids[i]] = results[i]
 
     def print_fine_grain_estimates(self):
         """Prints fine grain estimates to a file
@@ -411,7 +586,7 @@ class Aggregate:
         None.
             Prints the fine grain estimates into {out_prefix}_fine_grain_estimates.Q file
         """
-        outfile = self.out_prefix + "_fine_grain_estimates.Q"
+        outfile = self.out_prefix + Aggregate.finegrain_estimates_postfix
         logging.info(f"Writing fine grain estimates to {outfile}")
         with open(outfile, "w") as f:
             f.write("Id\t" + "\t".join(self.painting_vectors.keys()) + "\n")
@@ -428,28 +603,29 @@ class Aggregate:
             Prints the population-level estimates to {out_prefix}_fractions.Q file
         """
         pop_level_estimates = {}
-        pops = list(self.painting_vectors.keys())
-        for pop_index in range(len(pops)):
-            pop = pops[pop_index]
-            if pop not in self.pop_group_map:
+
+        column_name = list(self.painting_vectors.keys())
+        for pop_index in range(len(column_name)):
+            pop = column_name[pop_index]
+            if pop not in self.ref_pop_group_map:
                 raise ValueError(f"Can't seem to find {pop} in the {self.pop_group_file}.")
-            pop_groups = self.pop_group_map[pop]
+            pop_groups = self.ref_pop_group_map[pop]
             if pop_groups not in pop_level_estimates:
                 pop_level_estimates[pop_groups] = []
             pop_level_estimates[pop_groups].append(pop_index)
 
         pop_groups = sorted(pop_level_estimates.keys())
 
-        outfile = self.out_prefix + "_estimates.Q"
+        outfile = self.out_prefix + Aggregate.pop_estimates_postfix
         logging.info(f"Writing population-level estimates to {outfile}")
         with open(outfile, "w") as f:
             f.write("Ind\t" + "\t".join(pop_groups) + "\n")
-            for ind_id in self.ancestry_fractions:
+            for ind_id in self.fine_grain_estimates:
                 f.write(ind_id)
-                for this_pop in pop_groups:
+                for this_pop_group in pop_groups:
                     this_group_sum = 0
-                    for pop_index in pop_level_estimates[this_pop]:
-                        this_group_sum += self.ancestry_fractions[ind_id][pop_index]
+                    for pop_index in pop_level_estimates[this_pop_group]:
+                        this_group_sum += self.fine_grain_estimates[ind_id][pop_index]
                     f.write(f"\t{this_group_sum}")
                 f.write("\n")
         logging.info(f"{outfile} created successfully")
@@ -480,6 +656,8 @@ class Aggregate:
             formatter = logging.Formatter(fmt=f"[%(asctime)s] %(message)s", datefmt="%m-%d-%Y %I:%M:%S %p")
             console.setFormatter(formatter)
             logging.getLogger().addHandler(console)
+
+    # TODO: Write display the arguments on which the script has been launched
 
 
 if __name__ == '__main__':

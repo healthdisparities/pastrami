@@ -14,9 +14,11 @@ import logging
 import math
 import os.path
 import pickle
+import random
 import re
 import shlex
 import statistics
+import string
 import subprocess
 import sys
 from argparse import ArgumentParser, HelpFormatter
@@ -123,16 +125,28 @@ class Support:
             return False
 
     @staticmethod
-    def validate_output_prefix(out_prefix):
+    def validate_output_prefix(out_prefix: str):
         parent, prefix = os.path.split(out_prefix)
         if parent != "":
             if not Support.validate_dir(parent):
-                try:
-                    os.makedirs(parent)
-                except IOError:
-                    print(f"I don't seem to have access to output prefix directory. Are the permissions correct?")
-                    sys.exit(1)
+                Support.safe_dir_create(parent)
         return Support.validate_filename(prefix)
+
+    @staticmethod
+    def safe_dir_create(this_dir: str):
+        try:
+            os.makedirs(this_dir)
+        except IOError:
+            print(f"I don't seem to have access to output prefix directory. Are the permissions correct?")
+            sys.exit(1)
+
+    @staticmethod
+    def safe_dir_rm(this_dir: str):
+        try:
+            os.rmdir(this_dir)
+        except IOError:
+            print(f"I don't seem to have access to output prefix directory. Are the permissions correct?")
+            sys.exit(1)
 
     @staticmethod
     def merge_fam_files(infile1: str, infile2: str, outputfile: str):
@@ -143,6 +157,10 @@ class Support:
             with open(infile2, "r") as infile2_handle:
                 for line in infile2_handle:
                     out_handle.write(line)
+
+    @staticmethod
+    def create_pop_group_from_tfam(tfam_file: str):
+        pass
 
     @staticmethod
     def init_logger(log_file, verbosity):
@@ -572,10 +590,10 @@ class Analysis:
         logging.info(f"Found {self.query_tfam.shape[0]} query individuals")
 
     @staticmethod
-    def pull_chromosome_tped(prefix, chromosome):
+    def pull_chromosome_tped(prefix, chromosome, temp_dir):
         # TODO: Create the files in a temporary directory
         # Pull the genotypes for a given chromosome from a given prefix
-        chromosome_file_prefix = os.path.join('.', str(chromosome) + '.tmp')
+        chromosome_file_prefix = os.path.join(temp_dir, str(chromosome) + '.tmp')
         logging.info(f"Loading SNPs from chr{chromosome}")
         command = ['plink', '--tfile', prefix,
                    '--recode transpose',
@@ -587,7 +605,7 @@ class Analysis:
         # Support.run_command(command_list=command)
         subprocess.check_output(" ".join(command), shell=True)
 
-        if not os.path.isfile(chromosome_file_prefix+".tped"):
+        if not os.path.isfile(chromosome_file_prefix + ".tped"):
             print(f"Failed to create {chromosome_file_prefix}.tped")
             sys.exit(1)
 
@@ -607,8 +625,13 @@ class Analysis:
     def load_reference_tpeds(self):
         # Read in all of the reference TPEDs
         # print(self.chromosomes)
+        temp_name = "pastrami_" + ''.join(random.choice(string.ascii_letters) for _ in range(10))
+        Support.safe_dir_create(temp_name)
         pool = mp.Pool(processes=self.threads)
-        results = pool.map(lambda x: self.pull_chromosome_tped(self.reference_prefix, x), self.chromosomes)
+        results = pool.map(
+            lambda x: self.pull_chromosome_tped(prefix=self.reference_prefix, chromosome=x, temp_dir=temp_name),
+            self.chromosomes)
+        Support.safe_dir_rm(temp_name)
         for i in range(len(self.chromosomes)):
             self.reference_tpeds[str(self.chromosomes[i])] = results[i]
             self.reference_tpeds[str(self.chromosomes[i])].columns = self.reference_individuals
@@ -618,8 +641,13 @@ class Analysis:
         # Read in all of the reference TPEDs
         logging.info("Chromosomes to process: ")
         logging.info(self.chromosomes)
+        temp_name = "pastrami_" + ''.join(random.choice(string.ascii_letters) for _ in range(10))
+        Support.safe_dir_create(temp_name)
         pool = mp.Pool(processes=self.threads)
-        results = pool.map(lambda x: self.pull_chromosome_tped(self.query_prefix, x), self.chromosomes)
+        results = pool.map(
+            lambda x: self.pull_chromosome_tped(prefix=self.query_prefix, chromosome=x, temp_dir=temp_name),
+            self.chromosomes)
+        Support.safe_dir_rm(temp_name)
         for i in range(len(self.chromosomes)):
             self.query_tpeds[str(self.chromosomes[i])] = results[i]
             self.query_tpeds[str(self.chromosomes[i])].columns = self.query_individuals
@@ -896,12 +924,15 @@ class Analysis:
 
             # Just the haps for this chromosome
             chromosome_haplotypes = self.haplotypes.loc[self.haplotypes.iloc[:, 0] == chromosome, :]
-
+            temp_name = "pastrami_" + ''.join(random.choice(string.ascii_letters) for _ in range(10))
+            Support.safe_dir_create(temp_name)
             # Just the TPEDs for this chromosome
-            reference_tped = self.pull_chromosome_tped(self.reference_prefix, chromosome)
+            reference_tped = self.pull_chromosome_tped(prefix=self.reference_prefix, chromosome=chromosome,
+                                                       temp_dir=temp_name)
             reference_tped.columns = self.reference_individuals
-            query_tped = self.pull_chromosome_tped(self.query_prefix, chromosome)
-
+            query_tped = self.pull_chromosome_tped(prefix=self.query_prefix, chromosome=chromosome,
+                                                   temp_dir=temp_name)
+            Support.safe_dir_rm(temp_name)
             # Parallelize across equal-sized chunks of haplotypes for good speed
             chunk_size = min([30, math.ceil(chromosome_haplotypes.shape[0] / self.threads)])
             # print('Splitting haplotypes into chunks of', chunk_size)

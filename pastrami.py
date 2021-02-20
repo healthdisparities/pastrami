@@ -2,7 +2,7 @@
 """Pastrami - Population scale haplotype copying script"""
 
 __author__ = "Andrew Conley, Lavanya Rishishwar"
-__copyright__ = "Copyright 2020, Andrew Conley, Lavanya Rishishwar"
+__copyright__ = "Copyright 2021, Andrew Conley, Lavanya Rishishwar"
 __credits__ = ["Andrew Conely", "Lavanya Rishishwar"]
 __license__ = "GPL"
 __version__ = "0.1"
@@ -10,16 +10,21 @@ __maintainer__ = "Andrew Conley, Lavanya Rishishwar"
 __email__ = "aconley@ihrc.com; lrishishwar@ihrc.com"
 __status__ = "Development"
 
-from argparse import ArgumentParser, HelpFormatter
-import datetime
 import logging
 import math
 import os.path
-import pandas as pd
-import pathos.multiprocessing as mp
 import pickle
+import re
+import shlex
+import statistics
 import subprocess
 import sys
+from argparse import ArgumentParser, HelpFormatter
+
+import numpy as np
+import pandas as pd
+import pathos.multiprocessing as mp
+from scipy.optimize import minimize
 
 VERSION = 0.1
 PROGRAM_NAME = "pastrami.py"
@@ -36,17 +41,125 @@ class Colors:
     UNDERLINE = '\033[4m'
 
 
-class HaplotypeMaker:
-    pass
+class Support:
+    @staticmethod
+    def error_out(message=None):
+        if message is not None:
+            sys.exit(f"Error: {message}")
+        else:
+            sys.exit("The program encountered an error and has to exit.")
+
+    @staticmethod
+    def validate_file(the_file):
+        return os.path.isfile(the_file)
+
+    @staticmethod
+    def validate_file_size(the_file, fake_run=False):
+        if fake_run:
+            return True
+        else:
+            return os.stat(the_file).st_size > 0
+
+    @staticmethod
+    def validate_file_and_size_or_error(the_file, error_prefix='The file',
+                                        presence_suffix='doesn\'t exist',
+                                        size_suffix='is size 0', fake_run=False):
+        if not Support.validate_file(the_file=the_file) and not fake_run:
+            print(' '.join([error_prefix, the_file, presence_suffix]), 0, Colors.FAIL)
+            Support.error_out()
+
+        if not Support.validate_file_size(the_file=the_file) and not fake_run:
+            print(' '.join([error_prefix, the_file, size_suffix]), 0, Colors.FAIL)
+            Support.error_out()
+
+    @staticmethod
+    def validate_dir(the_dir):
+        return os.path.isdir(the_dir)
+
+    # TODO: This is a hastily written method, needs error fixing
+    @staticmethod
+    def validate_dir_or_error(the_dir, error_prefix="The dir", presence_suffix="doesn't exist",
+                              fake_run=False):
+        if not Support.validate_dir(the_dir=the_dir) and not fake_run:
+            print(' '.join([error_prefix, the_dir, presence_suffix]), 0, Colors.FAIL)
+            Support.error_out()
+
+    # TODO: Implement checks for dependency progams
+    @staticmethod
+    def check_dependencies():
+        pass
+
+    # TODO: Implement safe way of executing commands - hastily done for now
+    @staticmethod
+    def run_command(command):
+        output = subprocess.check_output(shlex.split(command), encoding="etf-8")
+        return output
+
+    @staticmethod
+    def init_logger(log_file, verbosity):
+        """Configures the logging for printing
+        Returns
+        -------
+        None
+            Logger behavior is set based on the Inputs variable
+        """
+        try:
+            logging.basicConfig(filename=log_file, filemode="w", level=logging.DEBUG,
+                                format=f"[%(asctime)s] %(message)s",
+                                datefmt="%m-%d-%Y %I:%M:%S %p")
+        except FileNotFoundError:
+            print(f"The supplied location for the log file '{log_file}'" +
+                  f"doesn't exist. Please check if the location exists.")
+            sys.exit(1)
+        except IOError:
+            print(f"I don't seem to have access to make the log file." +
+                  f"Are the permissions correct or is there a directory with the same name?")
+            sys.exit(1)
+
+        if verbosity:
+            console = logging.StreamHandler()
+            console.setLevel(logging.INFO)
+            formatter = logging.Formatter(fmt=f"[%(asctime)s] %(message)s", datefmt="%m-%d-%Y %I:%M:%S %p")
+            console.setFormatter(formatter)
+            logging.getLogger().addHandler(console)
 
 
 class Analysis:
+    chromosomes = list(range(1, 23))
+    fake_run = False
+    debug = True
+    min_haplotype_occurences = 0
+    optim_step_size = 0.0001
+    error_threshold = 1e-5
+    optim_iterations = 10
+    tolerance = 1e-8
+    ancestry_fraction_postfix = "_fractions.Q"
+    ancestry_painting_postfix = "_paintings.Q"
+    pop_estimates_postfix = "_estimates.Q"
+    finegrain_estimates_postfix = "_fine_grain_estimates.Q"
 
     def __init__(self, opts, unknown_args):
+        # General attributes
+        self.threads = opts.threads
+        self.log_file = opts.log_file
+        self.verbosity = opts.verbosity
 
-        self.chromosomes = list(range(1, 23))
-        self.min_haplotype_occurences = 0
+        # Any errors we encounter
+        self.errors = []
+        # The actual queue for the analysis
+        self.analysis = []
 
+        # Verbosity levels and colors
+        self.error_color = Colors.FAIL
+        self.main_process_verbosity = 1
+        self.warning_color = Colors.WARNING
+        self.warning_verbosity = 1
+        self.main_process_color = Colors.OKGREEN
+        self.sub_process_verbosity = 2
+        self.sub_process_color = Colors.OKBLUE
+        self.command_verbosity = 3
+
+        # Sub-commands
         self.sub_command = opts.sub_command
 
         self.reference_tped_file = None
@@ -60,9 +173,22 @@ class Analysis:
         self.reference_population_counts = None
         self.query_copying_fractions = None
         self.combined_copying_fractions = None
+        self.reference_individuals = None
+        self.reference_populations = None
+        self.reference_haplotype_counts = None
+        self.reference_haplotype_fractions = None
+        self.reference_copying_fractions = None
+
+        # Hapmake sub-command options
+        if self.sub_command == "hapmake" or self.sub_command == 'all':
+            self.min_snps = opts.min_snps
+            self.max_snps = opts.max_snps
+            self.max_rate = opts.max_rate
+            self.map_dir = opts.map_dir
+            self.hap_file = opts.hap_file
 
         # Build sub-command options
-        if self.sub_command == 'build':
+        if self.sub_command == 'build' or self.sub_command == 'all':
             self.reference_pickle_output_file = opts.reference_pickle_out
             self.reference_prefix = opts.reference_prefix
             self.haplotype_file = opts.haplotypes
@@ -70,8 +196,8 @@ class Analysis:
             self.reference_tpeds = pd.Series([], dtype=pd.StringDtype())
             self.reference_background = pd.Series([], dtype=pd.StringDtype())
 
-        # Query options
-        if self.sub_command == 'query':
+        # Query sub-command options
+        if self.sub_command == 'query' or self.sub_command == 'all':
             self.reference_pickle_file = opts.reference_pickle
             self.query_prefix = opts.query_prefix
             self.query_output_file = opts.query_out
@@ -79,82 +205,92 @@ class Analysis:
             self.query_tpeds = pd.Series([], dtype=pd.StringDtype())
             self.query_individuals = None
 
-        # Co-ancestry options
-        if self.sub_command == 'coanc':
+        # Co-ancestry sub-command options
+        if self.sub_command == 'coanc' or self.sub_command == 'all':
             self.haplotype_file = opts.haplotypes
             self.reference_prefix = opts.reference_prefix
             self.query_prefix = opts.query_prefix
-
             self.refernce_output_file = opts.reference_out
             self.query_output_file = opts.query_out
             self.query_combined_file = opts.combined_out
 
-        # Either values
-        self.reference_individuals = None
-        self.reference_populations = None
-        self.reference_haplotype_counts = None
-        self.reference_haplotype_fractions = None
-        self.reference_copying_fractions = None
+        # Aggregate sub-command options
+        if self.sub_command == "aggregate" or self.sub_command == 'all':
+            self.ancestry_infile = opts.ancestry_infile
+            self.pop_group_file = opts.pop_group_file
+            self.out_prefix = opts.out_prefix
+            self.fam_infile = opts.fam_infile
+            self.ref_pop_group_map = {}
+            self.ind_pop_map = {}
+            self.pop_ind_map = {}  # reverse map of ind_pop_map, sacrificing memory for speed later on
+            self.reference_individual_dict = {}
+            self.reference_pops = {}
+            self.ancestry_fractions = {}
+            self.af_header = []
+            self.painting_vectors = {}
+            self.painting_vectors_keys = []
+            self.fine_grain_estimates = {}
 
-        # Any errors we encounter
-        self.errors = []
+        Support.init_logger(log_file=self.log_file, verbosity=self.verbosity)
 
-        # The actual queue for the analysis
-        self.analysis = []
+    """ 
+        [Class section] Run control
+    """
 
-        self.threads = opts.threads
-        self.verbosity = 1
-        self.fake_run = False
+    def validate_options(self):
+        if self.sub_command == 'hapmake' or self.sub_command == "all":
+            # TODO: check for required input files
+            self.validate_map_dir()
+            self.analysis += ['make_haplotypes']
 
-        # Verbosity levels and colors
-        self.error_color = Colors.FAIL
-        self.main_process_verbosity = 1
-        self.warning_color = Colors.WARNING
-        self.warning_verbosity = 1
-        self.main_process_color = Colors.OKGREEN
-        self.sub_process_verbosity = 2
-        self.sub_process_color = Colors.OKBLUE
-        self.command_verbosity = 3
+        if self.sub_command == 'build' or self.sub_command == "all":
+            self.validate_reference_prefix()
+            self.validate_haplotypes()
+            self.analysis += ['build_reference_set']
 
-    @staticmethod
-    def error_out(message=None):
-        if message is not None:
-            sys.exit(f"Error: {message}")
-        else:
-            sys.exit("The program encountered an error and has to exit.")
+        if self.sub_command == 'query' or self.sub_command == "all":
+            self.validate_reference_pickle()
+            self.validate_query_prefix()
+            self.analysis += ['query_reference_set']
 
-    @staticmethod
-    def validate_file(the_file):
-        return os.path.isfile(the_file)
+        if self.sub_command == 'coanc' or self.sub_command == "all":
+            self.validate_reference_prefix()
+            if self.query_prefix is not None:
+                self.validate_query_prefix()
+            self.validate_haplotypes()
+            self.analysis += ['build_coanc']
 
-    def validate_file_size(self, the_file):
-        if not self.fake_run:
-            return os.stat(the_file).st_size > 0
-        else:
-            return True
+        if self.sub_command == 'aggregate' or self.sub_command == "all":
+            # TODO: check for required input files
+            self.validate_ancestry_infile()
+            self.validate_pop_group_file()
+            self.validate_fam_infile()
+            self.analysis += ['post_pastrami']
 
-    def print_and_log(self, text, verbosity, color=Colors.ENDC):
-        if verbosity <= self.verbosity:
-            time_string = '[' + str(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")) + ']'
-            print(time_string + ' ' + color + text + Colors.ENDC)
+        if len(self.analysis) == 0:
+            self.errors = self.errors + ['Nothing to do!']
 
-    def validate_file_and_size_or_error(self, the_file, error_prefix='The file',
-                                        presence_suffix='doesn\'t exist',
-                                        size_suffix='is size 0'):
-        if not self.validate_file(the_file) and not self.fake_run:
-            self.print_and_log(' '.join([error_prefix, the_file, presence_suffix]), 0, Colors.FAIL)
-            self.error_out()
+    def go(self):
+        logging.info(f"Analysis to perform: "+",".join(self.analysis))
+        while True:
+            step = self.analysis[0]
+            self.analysis = self.analysis[1:]
+            function = getattr(self, step)
+            function()
+            if len(self.analysis) == 0:
+                break
 
-        if not self.validate_file_size(the_file) and not self.fake_run:
-            self.print_and_log(' '.join([error_prefix, the_file, size_suffix]), 0, Colors.FAIL)
-            self.error_out()
+    """ 
+        [Class section] Functions for validating file
+    """
 
     def validate_haplotypes(self):
         if self.haplotype_file is None:
             self.errors += [self.sub_command + ' requires --haplotypes']
             return
 
-        self.validate_file_and_size_or_error(self.haplotype_file, 'Haplotype file')
+        Support.validate_file_and_size_or_error(the_file=self.haplotype_file, error_prefix='Haplotype file',
+                                                fake_run=self.fake_run)
 
     def validate_reference_prefix(self):
         if self.reference_prefix is None:
@@ -164,58 +300,119 @@ class Analysis:
         self.reference_tped_file = self.reference_prefix + '.tped'
         self.reference_tfam_file = self.reference_prefix + '.tfam'
 
-        [self.validate_file_and_size_or_error(the_file=i) for i in [self.reference_tped_file, self.reference_tfam_file]]
+        for i in [self.reference_tped_file, self.reference_tfam_file]:
+            Support.validate_file_and_size_or_error(the_file=i, fake_run=self.fake_run)
 
     def validate_query_prefix(self):
         if self.query_prefix is None:
             self.errors += [self.sub_command + ' requires --query-prefix']
+            return
 
         self.query_tped_file = self.query_prefix + '.tped'
         self.query_tfam_file = self.query_prefix + '.tfam'
 
-        [self.validate_file_and_size_or_error(the_file=i) for i in [self.query_tped_file, self.query_tfam_file]]
+        for i in [self.query_tped_file, self.query_tfam_file]:
+            Support.validate_file_and_size_or_error(the_file=i, fake_run=self.fake_run)
 
     def validate_reference_pickle(self):
         if self.reference_pickle_file is None:
             self.errors += [self.sub_command + ' requires --query-prefix']
+            return
 
-        self.validate_file_and_size_or_error(self.reference_pickle_file, 'Reference pickle')
+        Support.validate_file_and_size_or_error(the_file=self.reference_pickle_file,
+                                                error_prefix='Reference pickle', fake_run=self.fake_run)
 
-    def validate_options(self):
-        if self.sub_command == 'build':
-            self.validate_reference_prefix()
-            self.validate_haplotypes()
-            self.analysis += ['build_reference_set']
+    def validate_map_dir(self):
+        if self.map_dir is None:
+            self.errors += [self.sub_command + ' requires --map-dir']
+            return
 
-        if self.sub_command == 'query':
-            self.validate_reference_pickle()
-            self.validate_query_prefix()
-            self.analysis += ['query_reference_set']
+        Support.validate_dir_or_error(the_dir=self.map_dir, error_prefix='Map directory', fake_run=self.fake_run)
 
-        if self.sub_command == 'coanc':
-            self.validate_reference_prefix()
-            if self.query_prefix is not None:
-                self.validate_query_prefix()
-            self.validate_haplotypes()
-            self.analysis += ['build_coanc']
+    def validate_ancestry_infile(self):
+        if self.ancestry_infile is None:
+            self.errors += [self.sub_command + ' requires --pastrami-output']
+            return
 
-        if len(self.analysis) == 0:
-            self.errors = self.errors + ['Nothing to do!']
+        Support.validate_file_and_size_or_error(the_file=self.ancestry_infile,
+                                                error_prefix='Pastrami\' query output',
+                                                fake_run=self.fake_run)
 
-    def go(self):
+    def validate_pop_group_file(self):
+        if self.pop_group_file is None:
+            self.errors += [self.sub_command + ' requires --pop-group']
+            return
 
-        print(self.analysis)
-        while True:
-            step = self.analysis[0]
-            self.analysis = self.analysis[1:]
-            function = getattr(self, step)
-            function()
+        Support.validate_file_and_size_or_error(the_file=self.pop_group_file,
+                                                error_prefix='Population group mapping file',
+                                                fake_run=self.fake_run)
 
-            if len(self.analysis) == 0:
+    def validate_fam_infile(self):
+        if self.fam_infile is None:
+            self.errors += [self.sub_command + ' requires --pastrami-fam']
+            return
+
+        Support.validate_file_and_size_or_error(the_file=self.fam_infile,
+                                                error_prefix='FAM input',
+                                                fake_run=self.fake_run)
+
+    """ 
+        [Class section] Haplotype maker
+    """
+
+    def process_hapmap_file(self, chrom: int):
+        logging.info(f"[hapmake|chr{chrom}] Started processing")
+        haplotypes = ""
+        map_data = []
+        with open(os.path.join(self.map_dir, f"chr{chrom}.map"), "r") as f:
+            for line in f:
+                (position, cmorgan, snp) = line.rstrip().split("\t")
+                map_data.append([int(position), float(cmorgan), snp])
+        logging.info(f"[hapmake|chr{chrom}] File read")
+
+        left_snp = 0
+        right_snp = 0
+        snps = False
+
+        for row in range(len(map_data)):
+            right_snp += 1
+            if right_snp >= len(map_data):
                 break
 
+            # If the two SNPs have a recombination rate great than the max rate
+            if map_data[right_snp][1] - map_data[left_snp][1] >= self.max_rate:
+                if right_snp - left_snp >= self.min_snps:
+                    snps = True
+                else:
+                    left_snp = right_snp
+                    right_snp += 1
+
+            # If the haplotype is long enough
+            if right_snp - left_snp >= self.max_snps:
+                snps = True
+
+            # If snps isn't False, then save the range of the window
+            if snps is True:
+                haplotypes += f"{chrom}\t{left_snp}\t{right_snp}\t{map_data[right_snp - 2][1] - map_data[left_snp][1]}\n"
+                snps = False
+                left_snp = right_snp
+        logging.info(f"[hapmake|chr{chrom}] All haplotypes discovered")
+        return haplotypes
+
+    def make_haplotypes(self):
+        logging.info(f"[hapmake|chrAll] Starting pool for processing")
+        pool = mp.Pool(processes=self.threads)
+        results = pool.map(self.process_hapmap_file, range(1, 23))
+        with open(self.hap_file, "w") as f:
+            f.write("".join(results) + "\n")
+        logging.info(f"[hapmake|chrAll] Files written")
+
+    """ 
+        [Class section] Core Pastrami code - to be fragmented further in future
+    """
+
     def load_reference_pickle(self):
-        print('Loading reference pickle ' + self.reference_pickle_file)
+        logging.info('Loading reference pickle ' + self.reference_pickle_file)
         pickle_file_handle = open(self.reference_pickle_file, 'rb')
         old_pickle = pickle.load(pickle_file_handle)
         self.reference_tfam = old_pickle.reference_tfam
@@ -225,7 +422,7 @@ class Analysis:
         self.reference_background = old_pickle.reference_background
         self.haplotypes = old_pickle.haplotypes
         self.reference_copying_fractions = old_pickle.reference_copying_fractions
-        print('Reference pickle file loaded!')
+        logging.info('Reference pickle file loaded!')
         del old_pickle
 
     def load_reference_tfam(self):
@@ -233,11 +430,11 @@ class Analysis:
         self.reference_tfam.index = self.reference_tfam.iloc[:, 1]
         self.reference_tfam.columns = ['population', 'id', 'x1', 'x2', 'x3', 'x4']
         self.reference_individuals = pd.Series(self.reference_tfam.index.values)
-        print('Found', self.reference_tfam.shape[0], 'reference individuals')
+        logging.info(f"Found {self.reference_tfam.shape[0]} reference individuals")
 
         # Figure out the reference populations
         self.reference_populations = self.reference_tfam.iloc[:, 0].unique()
-        print('Found', len(self.reference_populations), 'refeerence populations')
+        logging.info(f"Found {len(self.reference_populations)} refeerence populations")
         self.reference_individual_populations = self.reference_tfam.iloc[:, 0]
 
         self.reference_population_counts = self.reference_tfam.iloc[:, 0].value_counts()
@@ -247,18 +444,17 @@ class Analysis:
         self.haplotypes = pd.read_table(self.haplotype_file, index_col=None, header=None)
         self.haplotypes.columns = ['chromosome', 'left', 'right', 'cM']
         self.haplotypes = self.haplotypes.loc[self.haplotypes['chromosome'].apply(lambda x: x in self.chromosomes), :]
-        print('Found', self.haplotypes.shape[0], 'haplotypes\n')
+        logging.info(f"Found f{self.haplotypes.shape[0]} haplotypes\n")
 
     def load_query_tfam(self):
         self.query_tfam = pd.read_table(self.query_tfam_file, index_col=None, header=None, sep=' ')
         self.query_tfam.index = self.query_tfam.iloc[:, 1]
         self.query_tfam.columns = ['population', 'id', 'x1', 'x2', 'x3', 'x4']
         self.query_individuals = self.query_tfam.index.values
-        print('Found', self.query_tfam.shape[0], 'query individuals')
+        logging.info(f"Found {self.query_tfam.shape[0]} query individuals")
 
     @staticmethod
     def pull_chromosome_tped(prefix, chromosome):
-
         # TODO: Create the files in a temporary directory
         # Pull the genotypes for a given chromosome from a given prefix
         chromosome_file_prefix = os.path.join('.', str(chromosome) + '.tmp')
@@ -269,6 +465,7 @@ class Analysis:
                             '--out', chromosome_file_prefix,
                             '--keep-allele-order'])
         # print(command)
+        # TODO: Move the command to Support.run_command
         subprocess.call(command, shell=True)
         chromosome_tped_file = chromosome_file_prefix + '.tped'
 
@@ -277,12 +474,12 @@ class Analysis:
         command = ' '.join(
             ['rm', ' '.join([chromosome_file_prefix + '.' + i for i in ['tped', 'tfam', 'nosex', 'log']])])
         # print(command)
+        # TODO: Move the command to Support.run_command
         subprocess.call(command, shell=True)
 
         return chromosome_tped
 
     def load_reference_tpeds(self):
-
         # Read in all of the reference TPEDs
         # print(self.chromosomes)
         pool = mp.Pool(processes=self.threads)
@@ -290,21 +487,20 @@ class Analysis:
         for i in range(len(self.chromosomes)):
             self.reference_tpeds[str(self.chromosomes[i])] = results[i]
             self.reference_tpeds[str(self.chromosomes[i])].columns = self.reference_individuals
-        print('Loaded', len(self.reference_tpeds), 'refernece TPEDs')
+        logging.info(f"Loaded {len(self.reference_tpeds)} refernece TPEDs")
 
     def load_query_tpeds(self):
-
         # Read in all of the reference TPEDs
-        print(self.chromosomes)
+        logging.info("Chromosomes to process: ")
+        logging.info(self.chromosomes)
         pool = mp.Pool(processes=self.threads)
         results = pool.map(lambda x: self.pull_chromosome_tped(self.query_prefix, x), self.chromosomes)
         for i in range(len(self.chromosomes)):
             self.query_tpeds[str(self.chromosomes[i])] = results[i]
             self.query_tpeds[str(self.chromosomes[i])].columns = self.query_individuals
-        print('Loaded', len(self.query_tpeds), 'query TPEDs')
+        logging.info(f"Loaded {len(self.query_tpeds)} query TPEDs")
 
     def build_reference_set(self):
-
         # Load up the reference data
         self.load_haplotypes()
         self.load_reference_tfam()
@@ -314,7 +510,7 @@ class Analysis:
 
         # Parallelize across equal-sized chunks of haplotypes for good speed
         chunk_size = min([30, math.ceil(self.haplotypes.shape[0] / self.threads)])
-        print('Splitting haplotypes into chunks of', chunk_size)
+        logging.info(f"Splitting haplotypes into chunks of {chunk_size}")
         chunk_indices = list(range(0, math.ceil(self.haplotypes.shape[0] / chunk_size) * chunk_size + 1, chunk_size))
         # chunks = len(chunk_indices) - 1
         chunk_indices[-1] = self.haplotypes.shape[0]
@@ -334,6 +530,7 @@ class Analysis:
                 this_chunk_genotypes += [self.reference_tpeds[str(this_chromosome)].iloc[left_snp:right_snp, :]]
             chunk_genotypes += [this_chunk_genotypes]
 
+        # noinspection PyTypeChecker
         chunk_data = [[chunk_indices[i]] + [chunk_haplotypes[i]] + [chunk_genotypes[i]] + [i] for i in
                       range(len(chunk_indices))]
 
@@ -351,7 +548,7 @@ class Analysis:
         self.reference_haplotype_counts = results[0][0]
         for i in range(1, len(results)):
             self.reference_haplotype_counts = pd.concat([self.reference_haplotype_counts, results[i][0]], axis=0)
-        print(self.reference_haplotype_counts.shape)
+        logging.info(self.reference_haplotype_counts.shape)
 
         # Find the population fractions for each reference haplotype
         self.reference_haplotype_fractions = results[0][1]
@@ -383,7 +580,7 @@ class Analysis:
     def chunk_build_reference_copying_fractions(self, chunk_data):
         chunk_indices, chunk_haplotypes, chunk_genotypes, chunk_number = chunk_data
 
-        print('Starting chunk ' + str(chunk_number))
+        logging.info('Starting chunk ' + str(chunk_number))
         chunk_haplotype_counts = pd.Series([], dtype=pd.StringDtype())
         chunk_haplotype_fractions = pd.Series([], dtype=pd.StringDtype())
 
@@ -489,6 +686,7 @@ class Analysis:
                 this_chunk_genotypes += [self.query_tpeds[str(this_chromosome)].iloc[left_snp:right_snp, :]]
             chunk_genotypes += [this_chunk_genotypes]
 
+        # noinspection PyTypeChecker
         chunk_data = [
             [chunk_indices[i]] + [chunk_haplotypes[i]] + [chunk_genotypes[i]] + [chunk_reference_fractions[i]] + [i] for
             i in range(len(chunk_indices))]
@@ -525,16 +723,9 @@ class Analysis:
 
         chunk_indices, chunk_haplotypes, chunk_genotypes, chunk_reference_fractions, chunk_number = chunk_data
 
-        # print('Starting chunk ' + str(chunk_number))
-        # chunk_haplotype_counts = pd.Series()
-        # chunk_haplotype_fractions = pd.Series()
         chunk_query_individual_fractions = pd.DataFrame(0,
                                                         index=self.query_individuals,
                                                         columns=self.reference_populations)
-
-        # print('Found', chunk_haplotypes.shape[0], 'haplotypes for this chunk')
-        # print('Found', len(chunk_haplotypes), 'corresponding genotype sets')
-        # print('Found', len(chunk_reference_fractions), 'corresponding fraction sets')
 
         # For each haplotype, get all of the counts for each individual
         for haplotype in range(len(chunk_haplotypes)):
@@ -556,8 +747,8 @@ class Analysis:
                 individual_haplotype = haplotype_strings[individual]
 
                 if individual_haplotype in haplotype_fractions.index:
-                    chunk_query_individual_fractions.loc[individual, :] += haplotype_fractions.loc[individual_haplotype,
-                                                                           :]
+                    chunk_query_individual_fractions.loc[individual, :] += \
+                        haplotype_fractions.loc[individual_haplotype, :]
 
         return chunk_query_individual_fractions
 
@@ -567,10 +758,6 @@ class Analysis:
         self.load_haplotypes()
         self.load_reference_tfam()
         self.load_query_tfam()
-
-        # Keep track of all of the results
-        # reference_results = pd.Series()
-        # query_results = pd.Series()
 
         pool = mp.Pool(processes=self.threads)
 
@@ -616,6 +803,7 @@ class Analysis:
                 chunk_reference_genotypes += [this_chunk_reference_genotypes]
                 chunk_query_genotypes += [this_chunk_query_genotypes]
 
+            # noinspection PyTypeChecker
             chunk_data = [[chunk_indices[i]] +
                           [chunk_haplotypes[i]] +
                           [chunk_reference_genotypes[i]] +
@@ -652,8 +840,8 @@ class Analysis:
 
         for haplotype in range(len(chunk_haplotypes)):
 
-            chromosome, left_snp, right_snp = chunk_haplotypes.iloc[haplotype, :]
-            haplotype_index = str(chromosome) + ':' + str(left_snp) + "-" + str(right_snp)
+            # chromosome, left_snp, right_snp = chunk_haplotypes.iloc[haplotype, :]
+            # haplotype_index = str(chromosome) + ':' + str(left_snp) + "-" + str(right_snp)
             # print(haplotype_index)
 
             haplotype_genotypes = chunk_reference_genotypes[haplotype]
@@ -695,25 +883,435 @@ class Analysis:
                     chunk_individual_counts[individual] += 1
         return [pd.concat(chunk_haplotype_fractions.to_dict(), axis=1).T, chunk_individual_counts]
 
+    """ 
+        [Class section] Aggregate functions that are run post main Pastrami code
+    """
 
-# TODO: Implement checks for dependency progams
-def check_dependencies():
-    pass
+    def post_pastrami(self):
+        # Read files
+        self.set_pop_group_map()
+        self.process_fam_file()
+        # Calculate and print ancestry fractions
+        self.process_ancestry_fractions()
+        self.print_ancestry_fractions()
+        # Calculate and print painting vectors
+        self.painting_vector_median()
+        self.print_ancestry_paintings()
+        # Calculate and print fine_grain and population_level estimates
+        self.get_fine_grain_estimates()
+        self.print_fine_grain_estimates()
+        self.print_population_level_estimates()
 
+    def set_pop_group_map(self):
+        """Reads in the pop x group file of the format:
+        #Population	Group
+        GWD	Western
+        MSL	Western
+        Yacouba	Western
+        Ahizi	Western
+        Fon	Nigerian
 
-# TODO: Implement safe way of executing commands
-def run_command(command):
-    pass
+        the two columns are tab separated. The file is read and stored in self.pop_group_map dictionary.
 
+        Returns
+        -------
+        None
+        Sets self.pop_group_map values and moves on
+        """
+        logging.info("Reading in population grouping file")
+        with open(self.pop_group_file, "r") as f:
+            for line in f:
+                # ignore comment line
+                if line.startswith("#"):
+                    continue
+                else:
+                    # TODO: implement check for at least two columns in the input file
+                    pop, group = line.rstrip().split("\t")
+                    self.ref_pop_group_map[pop] = group
+        logging.info("Population grouping file read")
 
-# TODO: Move all the screen print statements to logger
-def init_logger(log_file=None):
-    if log_file is None:
-        logging.basicConfig(level=logging.INFO, format='[%(asctime)s] %(message)s',
-                            datefmt='%m/%d/%Y %I:%M:%S %p')
-    else:
-        logging.basicConfig(filename=log_file, filemode='w', level=logging.DEBUG, format='[%(asctime)s] %(message)s',
-                            datefmt='%m/%d/%Y %I:%M:%S %p')
+    def process_fam_file(self):
+        """Read in and save the FAM file in the self.ind_pop_map dictionary
+
+        Returns
+        -------
+        None
+        Sets self.ind_pop_map values and moves on
+        """
+        logging.info("Processing FAM file")
+        # variables used for logging purposes only
+        ref_ind_count = 0
+        line_number = 0
+        self.reference_individual_dict = {}
+        with open(self.fam_infile, "r") as f:
+            for line in f:
+                # ignore comment lines
+                if line.startswith("#"):
+                    continue
+                else:
+                    # TODO: ensure that the input file has at least 3 columns
+                    col_split = line.rstrip().split()
+                    pop, ind = col_split[0], col_split[1]
+                    ind = re.sub(r"\.[12]$", "", ind)
+                    self.ind_pop_map[ind] = pop
+                    if pop in self.ref_pop_group_map:
+                        if ind not in self.reference_individual_dict:
+                            self.reference_individual_dict[ind] = True
+                            ref_ind_count += 1
+                        else:
+                            continue
+                    line_number += 1
+        logging.info(f"FAM file read, read {line_number} lines and found {ref_ind_count} reference individuals")
+
+    def process_ancestry_fractions(self) -> None:
+        """Does a bunch of things:
+        1. Reads in the ancestry file and stores it in a dictionary of lists (key: individual -> list:ancestry frac.)
+        2. Filters out populations (columns) not present in pop_group_map dict
+        3. Filters out individuals (rows) not present in reference_individuals dict
+        4. Average out fractions for each chromosome
+        5. Scales the fractions by dividing each value by column minimum
+        6. Second scaling by row - each value divided by sum(row)
+        7. Populates the reverse map of population to individual
+
+        Returns
+        -------
+        None
+        Sets object values and moves on
+        """
+        logging.info("Reading in the Pastrami ancestry fractions")
+        self.ancestry_fractions = {}
+        with open(self.ancestry_infile, "r") as f:
+            # Process the header containing the population names
+            full_header = f.readline().strip().split("\t")
+            indices = []  # will hold the columns to keep
+            self.af_header = []  # will hold the ancestry_fraction header
+
+            # Column filter to retain only reference populations
+            for pop_index in range(len(full_header)):
+                if full_header[pop_index] in self.ref_pop_group_map:
+                    self.af_header.append(full_header[pop_index])
+                    indices.append(pop_index + 1)  # +1 for individual id
+            column_mins = [1] * len(self.af_header)
+            logging.info(f"Found {len(self.af_header)} reference populations in the ancestry fraction file")
+
+            # Iterate through the rest of the lines
+            for line in f:
+                columns = line.rstrip().split("\t")
+                ind_id = re.sub(r"\.[12]", "", columns[0])
+
+                # Column filter to retain only reference populations
+                fractions = [float(columns[x]) for x in indices]
+
+                # Populate the pop_ind_map dictionary of lists
+                # TODO: Catch cases when ind_id is not defined in the FAM file
+                this_pop = self.ind_pop_map[ind_id]
+                if this_pop not in self.pop_ind_map:
+                    self.pop_ind_map[this_pop] = []
+                    self.pop_ind_map[this_pop].append(ind_id)
+                    self.ancestry_fractions[ind_id] = fractions
+                elif ind_id not in self.ancestry_fractions:
+                    self.pop_ind_map[this_pop].append(ind_id)
+                    self.ancestry_fractions[ind_id] = fractions
+                else:
+                    # Average the ancestry fractions and identify column minimums
+                    # LR: I am assuming that we will only see an individual
+                    # twice -> dictated by the regex and if condition above
+                    for i in range(len(fractions)):
+                        self.ancestry_fractions[ind_id][i] = (self.ancestry_fractions[ind_id][i] +
+                                                              fractions[i]) / 2
+                        if ind_id in self.reference_individual_dict and \
+                                column_mins[i] > self.ancestry_fractions[ind_id][i]:
+                            # noinspection PyTypeChecker
+                            column_mins[i] = self.ancestry_fractions[ind_id][i]
+
+        logging.info(f"Found {len(self.ancestry_fractions.keys())} reference individuals in the ancestry fraction file")
+
+        # Scale factors by column minimum, followed by row sum
+        logging.info("File read, scaling the fractions")
+        for ind_id in self.ancestry_fractions:
+            row_sum = 0
+            # Column minimum scaling
+            for i in range(len(self.af_header)):
+                self.ancestry_fractions[ind_id][i] = self.ancestry_fractions[ind_id][i] - column_mins[i]
+                if self.ancestry_fractions[ind_id][i] < 0:
+                    self.ancestry_fractions[ind_id][i] = 0
+                row_sum += self.ancestry_fractions[ind_id][i]
+            # Row sum scaling
+            for i in range(len(self.af_header)):
+                self.ancestry_fractions[ind_id][i] = self.ancestry_fractions[ind_id][i] / row_sum
+        logging.info("Ancestry fractions processed")
+
+    def shrinkage(self, i_was_in_the_pool=0.1) -> None:
+        for ind_id in self.ancestry_fractions:
+            row_len = len(self.af_header)
+            for i in range(row_len):
+                self.ancestry_fractions[ind_id][i] += ((1 / row_len) - self.ancestry_fractions[ind_id][
+                    i]) * i_was_in_the_pool
+
+    def rescale(self) -> None:
+        """Rescales ancestry_fractions so that summation of all values equals 1
+
+        Returns
+        -------
+        None
+        """
+        for ind_id in self.ancestry_fractions:
+            row_sum = 0
+            for i in range(len(self.af_header)):
+                if self.ancestry_fractions[ind_id][i] < 0:
+                    self.ancestry_fractions[ind_id][i] = 0
+                else:
+                    row_sum += self.ancestry_fractions[ind_id][i]
+            for i in range(len(self.af_header)):
+                self.ancestry_fractions[ind_id][i] /= row_sum
+
+    def painting_vector_median(self) -> None:
+        """Calculates paint vector median for each population. Following steps are performed:
+        1. For each reference population, number of individuals are calculated
+        2. Reference populations with number of individuals less than 4 are discarded
+        3. For the remaining populations, for each column, population mean and sd are calculated
+        4. Population mean and sd are used to calculate population Z-score for each column
+        5. Individuals with anamolous fractions, defined as fraction outside -5 <= Z <= 5, are discarded
+        6. Population-scale per column medians are calculated and stored as painting vectors
+
+        Returns
+        -------
+        None. Sets the value of painting vectors.
+        """
+        logging.info(f"Beginning calculation of median painting vectors")
+        populations = sorted(self.ref_pop_group_map.keys())
+        logging.info(f"{len(populations)} populations to process")
+        self.painting_vectors = {}
+
+        for this_pop in populations:
+            # Throw away populations with 3 or less individuals
+            if len(self.pop_ind_map[this_pop]) <= 3:
+                logging.info(f"Population {this_pop} contains less than 4 individuals, discarding.")
+                continue
+
+            # Extract the individuals of interest for easy access
+            pop_inds = self.pop_ind_map[this_pop]
+
+            # Create 0 list for mean and sd calculation; mean and sd will be used for Z-score calculation
+            this_mean = [0] * len(self.af_header)
+            this_sd = [0] * len(this_mean)
+
+            # Calculate population mean
+            for ind_id in pop_inds:
+                for col_id in range(len(self.af_header)):
+                    this_mean[col_id] += self.ancestry_fractions[ind_id][col_id]
+            this_mean = [i / len(pop_inds) for i in this_mean]
+
+            # Calculate population SD
+            for ind_id in pop_inds:
+                for col_id in range(len(self.af_header)):
+                    this_sd[col_id] += (self.ancestry_fractions[ind_id][col_id] - this_mean[col_id]) ** 2
+            this_sd = [(i / (len(pop_inds) - 1)) ** 0.5 for i in this_sd]
+
+            # Identify outliers; defined as individuals with ancestry fraction with Z-score > +/- 5
+            keep_set = []
+            for ind_id in pop_inds:
+                drop_this_ind = False
+                for col_id in range(len(self.af_header)):
+                    this_z = (self.ancestry_fractions[ind_id][col_id] - this_mean[col_id]) / this_sd[col_id]
+                    # print(f"{ind_id} and {col_id}: {this_z}")
+                    if abs(this_z) > 5:
+                        drop_this_ind = True
+                        logging.debug(f"Individual id {ind_id} contains outlier value " +
+                                      f"(value for {self.af_header[col_id]}=" +
+                                      f"{round(self.ancestry_fractions[ind_id][col_id], 3)}). Population mean = " +
+                                      f"{round(this_mean[col_id], 3)} and sd = {round(this_sd[col_id], 3)}")
+                        break
+                if not drop_this_ind:
+                    keep_set.append(ind_id)
+
+            dropped = len(pop_inds) - len(keep_set)
+            if dropped > 0:
+                logging.info(f"For reference population {this_pop}, dropped {dropped} outlier individuals")
+
+            # Calculate median ancestry fraction vectors from non-outlier individuals
+            self.painting_vectors[this_pop] = []
+            for col_id in range(len(self.af_header)):
+                this_fraction = []
+                for ind_id in keep_set:
+                    this_fraction.append(self.ancestry_fractions[ind_id][col_id])
+                self.painting_vectors[this_pop].append(statistics.median(this_fraction))
+
+        self.painting_vectors_keys = list(self.painting_vectors.keys())
+        logging.info(
+            f"Finished calculating painting vectors for {len(self.painting_vectors)} reference populations")
+
+    def regularized_rss(self, par: np.array, data: np.array) -> float:
+        """Calculates regularized residual sum of square error and adds a non-negative penalty to it
+
+        Parameters
+        ----------
+        par : np.array
+            1-D numpy array containing parameters from which error needs to be computed
+
+        data: np.array
+            1-D numpy array containing the ancestry fractions of an individual
+
+        Returns
+        -------
+        RSS error + penalty
+        """
+        error = 0
+        non_negative_count = 0
+
+        for value in par:
+            if value > 0:
+                non_negative_count += 1
+        # non-negative count penalty
+        penalty_multiplier = (non_negative_count - 1) * 0.25
+
+        for col_id in range(len(self.af_header)):
+            predicted = 0
+            for row_id in range(len(self.painting_vectors_keys)):
+                predicted += self.painting_vectors[self.painting_vectors_keys[row_id]][col_id] * par[row_id]
+
+            error += (predicted - data[col_id]) ** 2
+        # error calculated as residual sum of square (RSS) of predicted and actual
+        penalty = error * penalty_multiplier
+        # final unit that is to be minimized
+        error_penalty = error + penalty
+        logging.debug(f"Error: {error}; Penalty: {penalty}; sum: {error_penalty}")
+        return error_penalty
+
+    def regularize_this_row(self, row: str) -> list:
+        """Runs the minimize function on a single row from the ancestry fractions
+
+        Parameters
+        ----------
+        row : str
+            Ancestry fraction row name to process.
+
+        Returns
+        -------
+        List
+            A list of optimized estimates. The optimization can get stuck at local minima and
+            may produce sub-optimal results.
+        """
+        logging.info(f"Optimizing {row}")
+        par = np.array([1 / len(self.painting_vectors)] * len(self.painting_vectors))
+        data = np.array(self.ancestry_fractions[row])
+        this_estimate = minimize(fun=self.regularized_rss, args=data, x0=par, method='L-BFGS-B',
+                                 bounds=[(0, 1) for _ in range(len(par))],
+                                 options={'eps': Analysis.optim_step_size, 'maxiter': Analysis.optim_iterations},
+                                 tol=Analysis.tolerance)
+        logging.info(f"Optimized penalty for {row}: " + str(this_estimate["fun"]))
+        return this_estimate["x"]
+
+    def get_fine_grain_estimates(self):
+        """Calculates fine grain estimates of individuals listed within ancestry_fractions dictionary
+
+        Returns
+        -------
+        None.
+            Sets self.fine_grain_estimates to the fine grain estimates calculated
+        """
+        logging.info(f"Beginning calculation of NNLS estimates")
+        pool = mp.Pool(processes=self.threads)
+        results = pool.map(self.regularize_this_row, self.ancestry_fractions.keys())
+        logging.info(f"Finished all NNLS estimate calculations")
+
+        ind_ids = list(self.ancestry_fractions.keys())
+        for i in range(len(ind_ids)):
+            this_sum = sum(results[i])
+            # TODO: Investigate why sum is sometimes 0
+            if this_sum == 0:
+                this_sum = 1
+            for j in range(len(results[i])):
+                results[i][j] = results[i][j] / this_sum
+            self.fine_grain_estimates[ind_ids[i]] = results[i]
+
+    def print_ancestry_fractions(self):
+        """Prints ancestry fractions to a file
+
+        Returns
+        -------
+        None.
+            Prints the ancestry fractions to {out_prefix}_fractions.Q file
+        """
+        outfile = self.out_prefix + Analysis.ancestry_fraction_postfix
+        logging.info(f"Writing ancestry fractions to {outfile}")
+        with open(outfile, "w") as f:
+            f.write("Ind\t" + "\t".join(self.af_header) + "\n")
+            for ind_id in self.ancestry_fractions:
+                f.write(f"{ind_id}\t" + "\t".join([str(x) for x in self.ancestry_fractions[ind_id]]) + "\n")
+        logging.info(f"{outfile} successfully created")
+
+    def print_ancestry_paintings(self):
+        """Prints ancestry paintings to a file
+
+        Returns
+        -------
+        None.
+            Prints the ancestry fractions to {out_prefix}_paintings.Q file
+        """
+        outfile = self.out_prefix + Analysis.ancestry_painting_postfix
+        logging.info(f"Writing ancestry paintings to {outfile}")
+        with open(outfile, "w") as f:
+            f.write("Pop\t" + "\t".join(self.af_header) + "\n")
+            for pop in self.painting_vectors:
+                f.write(pop + "\t" + "\t".join([str(i) for i in self.painting_vectors[pop]]) + "\n")
+        logging.info(f"{outfile} successfully created")
+
+    def print_fine_grain_estimates(self):
+        """Prints fine grain estimates to a file
+
+        Returns
+        -------
+        None.
+            Prints the fine grain estimates into {out_prefix}_fine_grain_estimates.Q file
+        """
+        outfile = self.out_prefix + Analysis.finegrain_estimates_postfix
+        logging.info(f"Writing fine grain estimates to {outfile}")
+        with open(outfile, "w") as f:
+            f.write("Id\t" + "\t".join(self.painting_vectors.keys()) + "\n")
+            for ind_id in self.fine_grain_estimates:
+                f.write(f"{ind_id}\t" + "\t".join([str(x) for x in self.fine_grain_estimates[ind_id]]) + "\n")
+        logging.info(f"{outfile} successfully created")
+
+    def print_population_level_estimates(self):
+        """Calculates population-level estimates and prints them to a file
+
+        Returns
+        -------
+        None.
+            Prints the population-level estimates to {out_prefix}_fractions.Q file
+        """
+        pop_level_estimates = {}
+
+        column_name = list(self.painting_vectors.keys())
+        for pop_index in range(len(column_name)):
+            pop = column_name[pop_index]
+            if pop not in self.ref_pop_group_map:
+                raise ValueError(f"Can't seem to find {pop} in the {self.pop_group_file}.")
+            pop_groups = self.ref_pop_group_map[pop]
+            if pop_groups not in pop_level_estimates:
+                pop_level_estimates[pop_groups] = []
+            pop_level_estimates[pop_groups].append(pop_index)
+
+        pop_groups = sorted(pop_level_estimates.keys())
+
+        outfile = self.out_prefix + Analysis.pop_estimates_postfix
+        logging.info(f"Writing population-level estimates to {outfile}")
+        with open(outfile, "w") as f:
+            f.write("Ind\t" + "\t".join(pop_groups) + "\n")
+            for ind_id in self.fine_grain_estimates:
+                f.write(ind_id)
+                for this_pop_group in pop_groups:
+                    this_group_sum = 0
+                    for pop_index in pop_level_estimates[this_pop_group]:
+                        this_group_sum += self.fine_grain_estimates[ind_id][pop_index]
+                    f.write(f"\t{this_group_sum}")
+                f.write("\n")
+        logging.info(f"{outfile} created successfully")
+
+    """ 
+        End of class
+    """
 
 
 if __name__ == '__main__':
@@ -724,7 +1322,14 @@ if __name__ == '__main__':
                             ''',
                             formatter_class=lambda prog: HelpFormatter(prog, width=120, max_help_position=120))
 
+    # TODO: Make these options work in way that they can be used after the subcommand
     parser.add_argument('--help', '-h', '--h', action='store_true', default=False)
+    parser.add_argument('--log-file', "-l", "--l", required=False, default="run.log", metavar='run.log', type=str,
+                        help='File containing log information (default: %(default)s)', dest="log_file")
+    parser.add_argument('--threads', "-t", required=False, default=4, metavar='N', type=int,
+                        help='Number of concurrent threads (default: %(default)s)', dest="threads")
+    parser.add_argument('--verbose', "-v", required=False, action="store_true",
+                        help='Print program progress information on screen', dest="verbosity")
 
     subparsers = parser.add_subparsers(title=f"{PROGRAM_NAME} commands")
 
@@ -749,8 +1354,6 @@ if __name__ == '__main__':
                                     help='The reference copying matrix output')
 
     build_running_group = build_parser.add_argument_group('Running options')
-    build_running_group.add_argument('--threads', required=False, type=int, default=1, metavar='<INT>',
-                                     help='How many parallel threads to run')
     build_running_group.add_argument('--per-individual', required=False, default=False, action='store_true',
                                      help='Generate per-individual copying rather than per-population copying')
 
@@ -771,10 +1374,6 @@ if __name__ == '__main__':
                                     help='The query copying matrix output')
     query_output_group.add_argument('--combined-out', required=False, default=None, metavar='<OUTPUT>',
                                     help='The combined reference/query copying matrix output')
-
-    query_running_group = query_parser.add_argument_group('Running options')
-    query_running_group.add_argument('--threads', required=False, type=int, default=1, metavar='<INT>',
-                                     help='How many parallel threads to run')
 
     # Make the co-ancestry sub-command
     coanc_parser = subparsers.add_parser('coanc', help='Individual v. individual co-ancestry',
@@ -798,19 +1397,56 @@ if __name__ == '__main__':
     coanc_output_group.add_argument('--combined-out', required=False, default=None, metavar='<OUTPUT>',
                                     help='The all v. reference copying matrix output')
 
-    coanc_running_group = coanc_parser.add_argument_group('Running options')
-    coanc_running_group.add_argument('--threads', required=False, type=int, default=1, metavar='<INT>',
-                                     help='How many parallel threads to run')
-
     # Make the haplotype maker command
-    coanc_parser = subparsers.add_parser('hapmake', help='Create haplotypes',
-                                         formatter_class=lambda prog: HelpFormatter(prog, width=120,
-                                                                                    max_help_position=120))
-    coanc_parser.set_defaults(sub_command='hapmake')
+    hapmake_parser = subparsers.add_parser('hapmake', help='Create haplotypes',
+                                           formatter_class=lambda prog: HelpFormatter(prog, width=120,
+                                                                                      max_help_position=120))
+    hapmake_parser.set_defaults(sub_command='hapmake')
 
-    coanc_input_group = coanc_parser.add_argument_group('Input options')
-    coanc_input_group.add_argument('--map-file', required=False, default=None, metavar='',
-                                   help='File of haplotype positions')
+    hapmake_input_group = hapmake_parser.add_argument_group('Input options')
+    hapmake_input_group.add_argument('--map-dir', required=False, default=None, metavar='maps/', type=str,
+                                     help='Directory containing genetic maps: chr1.map, chr2.map, etc',
+                                     dest="map_dir")
+    hapmake_input_group.add_argument('--min-snps', required=False, default=7, metavar='MinSNPs', type=int,
+                                     help='Minimum number of SNPs in a haplotype block (default: %(default)s)',
+                                     dest="min_snps")
+    hapmake_input_group.add_argument('--max-snps', required=False, default=20, metavar='MaxSNPs', type=int,
+                                     help='Maximum number of SNPs in a haplotype block (default: %(default)s)',
+                                     dest="max_snps")
+    hapmake_input_group.add_argument('--max-rate', required=False, default=0.3, metavar='MaxRate', type=float,
+                                     help='Maximum recombination rate (default: %(default)s)',
+                                     dest="max_rate")
+    hapmake_output_group = hapmake_parser.add_argument_group('Output options')
+    hapmake_output_group.add_argument('--hap-file', required=False, default="out.haplotypes", metavar='out.haplotypes',
+                                      type=str,
+                                      help='Output file containing haplotypes (default: %(default)s)', dest="hap_file")
+
+    # Make the aggregate maker command
+    aggregate_parser = subparsers.add_parser('aggregate', help='Create haplotypes',
+                                             formatter_class=lambda prog: HelpFormatter(prog, width=120,
+                                                                                        max_help_position=120))
+    aggregate_parser.set_defaults(sub_command='aggregate')
+
+    aggregate_input_group = aggregate_parser.add_argument_group('Input options')
+    aggregate_input_group.add_argument('--pastrami-output', required=False, default=None, metavar='ancestry.tsv',
+                                       type=str, dest="ancestry_infile",
+                                       help="Output file generated from Pastrami's query subcommand")
+    aggregate_input_group.add_argument('--pop-group', required=False, default=None, metavar='pop2group.txt', type=str,
+                                       help='File containing population to group (e.g., tribes to region) mapping',
+                                       dest="pop_group_file")
+    aggregate_input_group.add_argument('--pastrami-fam', required=False, default=None, metavar='african.fam', type=str,
+                                       help='File containing individual and population mapping in FAM format',
+                                       dest="fam_infile")
+
+    aggregate_output_group = aggregate_parser.add_argument_group('Output options')
+    aggregate_output_group.add_argument('--out-prefix', required=False, default="pastrami", metavar='out-prefix',
+                                        type=str, dest="out_prefix",
+                                        help="""Output prefix for ancestry estimates files (default: %(default)s). 
+                                         Four files are created:\n 
+                                         * <prefix>_fractions.Q, \n
+                                         * <prefix>_paintings.Q,\n
+                                         * <prefix>_estimates.Q, \n
+                                         * <prefix>_fine_grain_estimates.Q\n""")
 
     options, unknown_arguments = parser.parse_known_args()
 
@@ -838,6 +1474,18 @@ if __name__ == '__main__':
         print(Colors.ENDC)
         sys.exit(0)
 
+    if options.sub_command == 'aggregate' and options.help:
+        print(Colors.HEADER)
+        aggregate_parser.print_help()
+        print(Colors.ENDC)
+        sys.exit(0)
+
+    if options.sub_command == 'hapmake' and options.help:
+        print(Colors.HEADER)
+        hapmake_parser.print_help()
+        print(Colors.ENDC)
+        sys.exit(0)
+
     # Start the analysis
     analysis = Analysis(options, unknown_arguments)
 
@@ -851,9 +1499,13 @@ if __name__ == '__main__':
             query_parser.print_help()
         elif options.sub_command == 'coanc':
             coanc_parser.print_help()
+        elif options.sub_command == "hapmake":
+            hapmake_parser.print_help()
+        elif options.sub_command == "aggregate":
+            aggregate_parser.print_help()
         print(Colors.ENDC)
         print(Colors.FAIL + '\n\nErrors:')
-        [print(i) for i in analysis.errors]
+        print("\n".join(analysis.errors))
         print(Colors.ENDC)
         sys.exit()
 

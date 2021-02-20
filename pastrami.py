@@ -5,7 +5,7 @@ __author__ = "Andrew Conley, Lavanya Rishishwar"
 __copyright__ = "Copyright 2021, Andrew Conley, Lavanya Rishishwar"
 __credits__ = ["Andrew Conely", "Lavanya Rishishwar"]
 __license__ = "GPL"
-__version__ = "0.1"
+__version__ = "0.2"
 __maintainer__ = "Andrew Conley, Lavanya Rishishwar"
 __email__ = "aconley@ihrc.com; lrishishwar@ihrc.com"
 __status__ = "Development"
@@ -43,27 +43,27 @@ class Colors:
 
 class Support:
     @staticmethod
-    def error_out(message=None):
+    def error_out(message: str = None):
         if message is not None:
             sys.exit(f"Error: {message}")
         else:
             sys.exit("The program encountered an error and has to exit.")
 
     @staticmethod
-    def validate_file(the_file):
+    def validate_file(the_file: str):
         return os.path.isfile(the_file)
 
     @staticmethod
-    def validate_file_size(the_file, fake_run=False):
+    def validate_file_size(the_file: str, fake_run: str = False):
         if fake_run:
             return True
         else:
             return os.stat(the_file).st_size > 0
 
     @staticmethod
-    def validate_file_and_size_or_error(the_file, error_prefix='The file',
-                                        presence_suffix='doesn\'t exist',
-                                        size_suffix='is size 0', fake_run=False):
+    def validate_file_and_size_or_error(the_file: str, error_prefix: str = 'The file',
+                                        presence_suffix: str = 'doesn\'t exist',
+                                        size_suffix: str = 'is size 0', fake_run: bool = False):
         if not Support.validate_file(the_file=the_file) and not fake_run:
             print(' '.join([error_prefix, the_file, presence_suffix]), 0, Colors.FAIL)
             Support.error_out()
@@ -73,13 +73,13 @@ class Support:
             Support.error_out()
 
     @staticmethod
-    def validate_dir(the_dir):
+    def validate_dir(the_dir: str):
         return os.path.isdir(the_dir)
 
     # TODO: This is a hastily written method, needs error fixing
     @staticmethod
-    def validate_dir_or_error(the_dir, error_prefix="The dir", presence_suffix="doesn't exist",
-                              fake_run=False):
+    def validate_dir_or_error(the_dir: str, error_prefix: str = "The dir", presence_suffix: str = "doesn't exist",
+                              fake_run: bool = False):
         if not Support.validate_dir(the_dir=the_dir) and not fake_run:
             print(' '.join([error_prefix, the_dir, presence_suffix]), 0, Colors.FAIL)
             Support.error_out()
@@ -89,11 +89,60 @@ class Support:
     def check_dependencies():
         pass
 
-    # TODO: Implement safe way of executing commands - hastily done for now
     @staticmethod
-    def run_command(command):
-        output = subprocess.check_output(shlex.split(command), encoding="etf-8")
+    def run_command(command_str: str = None, command_list: list = None, shell=False):
+        if command_str is None and command_list is None:
+            raise ValueError("Support.run_command() was called without any command to execute.")
+        try:
+            if command_str is not None:
+                logging.info(f"Attempting to run: {command_str}")
+                output = subprocess.check_output(shlex.split(command_str), encoding="utf-8", shell=shell)
+
+            else:
+                logging.info(f"Attempting to run: " + " ".join([str(x) for x in command_list]))
+                output = subprocess.check_output(command_list, encoding="utf-8", shell=shell)
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Encountered an error executing the command: ")
+            if command_str is not None:
+                logging.error(command_str)
+            else:
+                logging.error(command_list)
+            logging.error(f"Error details:")
+            logging.error(f"Exit code={e.returncode}")
+            logging.error(f"Error message={e.output}")
+            sys.exit(1)
+        # logging.info(f"Command output = {output}")
+        logging.info("Command executed without raising any exceptions")
         return output
+
+    @staticmethod
+    def validate_filename(filename: str):
+        if re.match(r"^[a-zA-Z0-9_.-]+$", filename):
+            return True
+        else:
+            return False
+
+    @staticmethod
+    def validate_output_prefix(out_prefix):
+        parent, prefix = os.path.split(out_prefix)
+        if parent != "":
+            if not Support.validate_dir(parent):
+                try:
+                    os.makedirs(parent)
+                except IOError:
+                    print(f"I don't seem to have access to output prefix directory. Are the permissions correct?")
+                    sys.exit(1)
+        return Support.validate_filename(prefix)
+
+    @staticmethod
+    def merge_fam_files(infile1: str, infile2: str, outputfile: str):
+        with open(outputfile, "w") as out_handle:
+            with open(infile1, "r") as infile1_handle:
+                for line in infile1_handle:
+                    out_handle.write(line)
+            with open(infile2, "r") as infile2_handle:
+                for line in infile2_handle:
+                    out_handle.write(line)
 
     @staticmethod
     def init_logger(log_file, verbosity):
@@ -138,7 +187,7 @@ class Analysis:
     pop_estimates_postfix = "_estimates.Q"
     finegrain_estimates_postfix = "_fine_grain_estimates.Q"
 
-    def __init__(self, opts, unknown_args):
+    def __init__(self, opts):
         # General attributes
         self.threads = opts.threads
         self.log_file = opts.log_file
@@ -179,16 +228,56 @@ class Analysis:
         self.reference_haplotype_fractions = None
         self.reference_copying_fractions = None
 
+        # All sub-command options
+        if self.sub_command == 'all':
+            # TODO: Test all subcommand
+            # Required options
+            self.reference_prefix = opts.reference_prefix
+            self.query_prefix = opts.query_prefix
+            self.out_prefix = opts.out_prefix
+            self.map_dir = opts.map_dir
+            self.haplotype_file = opts.haplotypes
+            self.pop_group_file = opts.pop_group_file
+            # Outputs to be made
+            self.reference_pickle_output_file = None
+            self.reference_output_file = None
+            self.reference_pickle_file = None
+            self.query_output_file = None
+            self.combined_output_file = None
+            self.ancestry_infile = None
+            self.fam_infile = None
+            # Hapmake
+            self.min_snps = opts.min_snps
+            self.max_snps = opts.max_snps
+            self.max_rate = opts.max_rate
+            # Build options
+            self.reference_tpeds = pd.Series([], dtype=pd.StringDtype())
+            self.reference_background = pd.Series([], dtype=pd.StringDtype())
+            # Query options
+            self.query_tpeds = pd.Series([], dtype=pd.StringDtype())
+            self.query_individuals = None
+            # aggregate options
+            self.ref_pop_group_map = {}
+            self.ind_pop_map = {}
+            self.pop_ind_map = {}  # reverse map of ind_pop_map, sacrificing memory for speed later on
+            self.reference_individual_dict = {}
+            self.reference_pops = {}
+            self.ancestry_fractions = {}
+            self.af_header = []
+            self.painting_vectors = {}
+            self.painting_vectors_keys = []
+            self.fine_grain_estimates = {}
+
         # Hapmake sub-command options
-        if self.sub_command == "hapmake" or self.sub_command == 'all':
+        if self.sub_command == 'hapmake':
             self.min_snps = opts.min_snps
             self.max_snps = opts.max_snps
             self.max_rate = opts.max_rate
             self.map_dir = opts.map_dir
-            self.hap_file = opts.hap_file
+            self.haplotype_file = opts.haplotypes
 
         # Build sub-command options
-        if self.sub_command == 'build' or self.sub_command == 'all':
+        if self.sub_command == 'build':
             self.reference_pickle_output_file = opts.reference_pickle_out
             self.reference_prefix = opts.reference_prefix
             self.haplotype_file = opts.haplotypes
@@ -197,7 +286,7 @@ class Analysis:
             self.reference_background = pd.Series([], dtype=pd.StringDtype())
 
         # Query sub-command options
-        if self.sub_command == 'query' or self.sub_command == 'all':
+        if self.sub_command == 'query':
             self.reference_pickle_file = opts.reference_pickle
             self.query_prefix = opts.query_prefix
             self.query_output_file = opts.query_out
@@ -206,7 +295,7 @@ class Analysis:
             self.query_individuals = None
 
         # Co-ancestry sub-command options
-        if self.sub_command == 'coanc' or self.sub_command == 'all':
+        if self.sub_command == 'coanc':
             self.haplotype_file = opts.haplotypes
             self.reference_prefix = opts.reference_prefix
             self.query_prefix = opts.query_prefix
@@ -215,7 +304,7 @@ class Analysis:
             self.query_combined_file = opts.combined_out
 
         # Aggregate sub-command options
-        if self.sub_command == "aggregate" or self.sub_command == 'all':
+        if self.sub_command == 'aggregate':
             self.ancestry_infile = opts.ancestry_infile
             self.pop_group_file = opts.pop_group_file
             self.out_prefix = opts.out_prefix
@@ -238,30 +327,32 @@ class Analysis:
     """
 
     def validate_options(self):
-        if self.sub_command == 'hapmake' or self.sub_command == "all":
-            # TODO: check for required input files
+        if self.sub_command == "all":
+            self.validate_and_set_all_subcommand_options()
+            self.analysis += ['build_reference_set', 'query_reference_set', 'build_coanc', 'post_pastrami']
+
+        if self.sub_command == 'hapmake':
             self.validate_map_dir()
             self.analysis += ['make_haplotypes']
 
-        if self.sub_command == 'build' or self.sub_command == "all":
+        if self.sub_command == 'build':
             self.validate_reference_prefix()
             self.validate_haplotypes()
             self.analysis += ['build_reference_set']
 
-        if self.sub_command == 'query' or self.sub_command == "all":
+        if self.sub_command == 'query':
             self.validate_reference_pickle()
             self.validate_query_prefix()
             self.analysis += ['query_reference_set']
 
-        if self.sub_command == 'coanc' or self.sub_command == "all":
+        if self.sub_command == 'coanc':
             self.validate_reference_prefix()
             if self.query_prefix is not None:
                 self.validate_query_prefix()
             self.validate_haplotypes()
             self.analysis += ['build_coanc']
 
-        if self.sub_command == 'aggregate' or self.sub_command == "all":
-            # TODO: check for required input files
+        if self.sub_command == 'aggregate':
             self.validate_ancestry_infile()
             self.validate_pop_group_file()
             self.validate_fam_infile()
@@ -271,7 +362,7 @@ class Analysis:
             self.errors = self.errors + ['Nothing to do!']
 
     def go(self):
-        logging.info(f"Analysis to perform: "+",".join(self.analysis))
+        logging.info(f"Analysis to perform: " + ",".join(self.analysis))
         while True:
             step = self.analysis[0]
             self.analysis = self.analysis[1:]
@@ -283,6 +374,32 @@ class Analysis:
     """ 
         [Class section] Functions for validating file
     """
+
+    def validate_and_set_all_subcommand_options(self):
+        self.validate_reference_prefix()
+        self.validate_query_prefix()
+        self.validate_pop_group_file()
+
+        Support.validate_output_prefix(self.out_prefix)
+
+        if self.haplotype_file is None:
+            if self.map_dir is None:
+                self.errors += [self.sub_command + ' requires --haplotypes or --map-dir']
+                return
+            else:
+                self.validate_map_dir()
+                self.haplotype_file = self.out_prefix + ".hap"
+
+        self.reference_pickle_output_file = self.out_prefix + ".pickle"
+        self.reference_output_file = self.out_prefix + ".hap"
+        self.reference_pickle_file = self.reference_pickle_output_file
+        self.query_output_file = self.out_prefix + "_query.tsv"
+        self.combined_output_file = self.out_prefix + ".tsv"
+        self.ancestry_infile = self.combined_output_file
+        self.fam_infile = self.out_prefix + ".fam"
+        Support.merge_fam_files(infile1=self.query_tfam_file,
+                                infile2=self.reference_tfam_file,
+                                outputfile=self.fam_infile)
 
     def validate_haplotypes(self):
         if self.haplotype_file is None:
@@ -338,6 +455,7 @@ class Analysis:
                                                 error_prefix='Pastrami\' query output',
                                                 fake_run=self.fake_run)
 
+    # TODO: If user doesn't supply pop-group file, create one based on the TFAM file
     def validate_pop_group_file(self):
         if self.pop_group_file is None:
             self.errors += [self.sub_command + ' requires --pop-group']
@@ -403,7 +521,7 @@ class Analysis:
         logging.info(f"[hapmake|chrAll] Starting pool for processing")
         pool = mp.Pool(processes=self.threads)
         results = pool.map(self.process_hapmap_file, range(1, 23))
-        with open(self.hap_file, "w") as f:
+        with open(self.haplotype_file, "w") as f:
             f.write("".join(results) + "\n")
         logging.info(f"[hapmake|chrAll] Files written")
 
@@ -422,8 +540,8 @@ class Analysis:
         self.reference_background = old_pickle.reference_background
         self.haplotypes = old_pickle.haplotypes
         self.reference_copying_fractions = old_pickle.reference_copying_fractions
-        logging.info('Reference pickle file loaded!')
         del old_pickle
+        logging.info('Reference pickle file loaded!')
 
     def load_reference_tfam(self):
         self.reference_tfam = pd.read_table(self.reference_tfam_file, index_col=None, header=None, sep=' ')
@@ -458,24 +576,31 @@ class Analysis:
         # TODO: Create the files in a temporary directory
         # Pull the genotypes for a given chromosome from a given prefix
         chromosome_file_prefix = os.path.join('.', str(chromosome) + '.tmp')
-        command = ' '.join(['plink',
-                            '--tfile', prefix,
-                            '--recode transpose',
-                            '--chr', str(chromosome),
-                            '--out', chromosome_file_prefix,
-                            '--keep-allele-order'])
-        # print(command)
+        logging.info(f"Loading SNPs from chr{chromosome}")
+        command = ['plink', '--tfile', prefix,
+                   '--recode transpose',
+                   '--chr', str(chromosome),
+                   '--out', chromosome_file_prefix,
+                   '--keep-allele-order']
         # TODO: Move the command to Support.run_command
-        subprocess.call(command, shell=True)
-        chromosome_tped_file = chromosome_file_prefix + '.tped'
+        # Support.run_command(command_str=" ".join(command), shell=True)
+        # Support.run_command(command_list=command)
+        subprocess.check_output(" ".join(command), shell=True)
+
+        if not os.path.isfile(chromosome_file_prefix+".tped"):
+            print(f"Failed to create {chromosome_file_prefix}.tped")
+            sys.exit(1)
 
         # Read the thing and remove the temporary files
+        chromosome_tped_file = chromosome_file_prefix + '.tped'
         chromosome_tped = pd.read_table(chromosome_tped_file, index_col=None, header=None, sep=' ').iloc[:, 4::2]
-        command = ' '.join(
-            ['rm', ' '.join([chromosome_file_prefix + '.' + i for i in ['tped', 'tfam', 'nosex', 'log']])])
-        # print(command)
+
+        # TODO: Move this to Python's rm command?
+        command = ['rm'] + [chromosome_file_prefix + '.' + i for i in ['tped', 'tfam', 'nosex', 'log']]
+
         # TODO: Move the command to Support.run_command
-        subprocess.call(command, shell=True)
+        # Support.run_command(command_list=command)
+        subprocess.check_output(" ".join(command), shell=True)
 
         return chromosome_tped
 
@@ -664,7 +789,7 @@ class Analysis:
 
         # Parallelize across equal-sized chunks of haplotypes for good speed
         chunk_size = min([30, math.ceil(self.haplotypes.shape[0] / self.threads)])
-        # print('Splitting haplotypes into chunks of', chunk_size)
+        logging.info(f"Splitting haplotypes into chunks of {chunk_size}")
         chunk_indices = list(range(0, math.ceil(self.haplotypes.shape[0] / chunk_size) * chunk_size + 1, chunk_size))
         # chunks = len(chunk_indices) - 1
         chunk_indices[-1] = self.haplotypes.shape[0]
@@ -695,15 +820,16 @@ class Analysis:
         del self.reference_haplotype_fractions
         del self.query_tpeds
 
+        logging.info("Calculating reference copying fractions...")
         pool = mp.Pool(processes=self.threads)
-
         results = pool.map_async(self.chunk_query_reference_copying_fractions, chunk_data)
         results.wait()
         results = results.get()
         pool.close()
         pool.join()
-
-        # Find the query indvidiual-refernce population copying rates
+        logging.info("Reference copying fractions calculated")
+        logging.info("Finding the query indvidiual-reference population copying rates...")
+        # Find the query indvidiual-reference population copying rates
         self.query_copying_fractions = results[0]
         for i in range(1, len(results)):
             self.query_copying_fractions += results[i]
@@ -713,6 +839,7 @@ class Analysis:
         self.query_copying_fractions -= self.reference_background
         self.query_copying_fractions[self.query_copying_fractions < 0] = 0
         self.query_copying_fractions = self.query_copying_fractions.T.apply(lambda x: x / x.sum()).T
+        logging.info(f"Writing to files {self.query_output_file} and {self.combined_output_file}")
         self.query_copying_fractions.to_csv(self.query_output_file, sep='\t')
 
         self.combined_copying_fractions = pd.concat([self.reference_copying_fractions, self.query_copying_fractions],
@@ -1324,16 +1451,102 @@ if __name__ == '__main__':
 
     # TODO: Make these options work in way that they can be used after the subcommand
     parser.add_argument('--help', '-h', '--h', action='store_true', default=False)
-    parser.add_argument('--log-file', "-l", "--l", required=False, default="run.log", metavar='run.log', type=str,
-                        help='File containing log information (default: %(default)s)', dest="log_file")
-    parser.add_argument('--threads', "-t", required=False, default=4, metavar='N', type=int,
-                        help='Number of concurrent threads (default: %(default)s)', dest="threads")
-    parser.add_argument('--verbose', "-v", required=False, action="store_true",
-                        help='Print program progress information on screen', dest="verbosity")
 
     subparsers = parser.add_subparsers(title=f"{PROGRAM_NAME} commands")
 
-    # Make the build sub-command parser
+    # Make the "all" sub-command parser
+    all_parser = subparsers.add_parser('all', help='Perform full analysis',
+                                       formatter_class=lambda prog: HelpFormatter(prog, width=120,
+                                                                                  max_help_position=120))
+    all_parser.set_defaults(sub_command='all')
+
+    # Add build input arguments
+    all_input_group = all_parser.add_argument_group('Required Input options')
+    all_input_group.add_argument('--reference-prefix', required=False, default=None, metavar='<PREFIX>',
+                                 help='Prefix for the reference TPED/TFAM input files')
+    all_input_group.add_argument('--query-prefix', required=False, default=None, metavar='<TSV>',
+                                 help='Prefix for the query TPED/TFAM input files')
+    all_input_group.add_argument('--haplotypes', required=False, default=None, metavar='<TSV>',
+                                 help='File of haplotype positions')
+    all_input_group.add_argument('--pop-group', required=False, default=None, metavar='pop2group.txt', type=str,
+                                 help='File containing population to group (e.g., tribes to region) mapping',
+                                 dest="pop_group_file")
+
+    # Add build output arguments
+    all_output_group = all_parser.add_argument_group('Output options')
+    all_output_group.add_argument('--out-prefix', required=False, default="pastrami", metavar='out-prefix',
+                                  type=str, dest="out_prefix",
+                                  help="""Output prefix (default: %(default)s) for creating following sets of files.\n 
+                                         <prefix>.pickle, \n
+                                         <prefix>_query.tsv, \n
+                                         <prefix>.tsv, \n
+                                         <prefix>.fam, \n
+                                         <prefix>_fractions.Q, \n
+                                         <prefix>_paintings.Q, \n
+                                         <prefix>_estimates.Q, \n
+                                         <prefix>_fine_grain_estimates.Q\n""")
+
+    all_hapmake_group = all_parser.add_argument_group('Optional arguments for hapmake stage')
+    all_hapmake_group.add_argument('--map-dir', required=False, default=None, metavar='maps/', type=str,
+                                   help='Directory containing genetic maps: chr1.map, chr2.map, etc',
+                                   dest="map_dir")
+    all_hapmake_group.add_argument('--min-snps', required=False, default=7, metavar='MinSNPs', type=int,
+                                   help='Minimum number of SNPs in a haplotype block (default: %(default)s)',
+                                   dest="min_snps")
+    all_hapmake_group.add_argument('--max-snps', required=False, default=20, metavar='MaxSNPs', type=int,
+                                   help='Maximum number of SNPs in a haplotype block (default: %(default)s)',
+                                   dest="max_snps")
+    all_hapmake_group.add_argument('--max-rate', required=False, default=0.3, metavar='MaxRate', type=float,
+                                   help='Maximum recombination rate (default: %(default)s)',
+                                   dest="max_rate")
+
+    all_runtime_group = all_parser.add_argument_group('Runtime options')
+    all_runtime_group.add_argument('--per-individual', required=False, default=False, action='store_true',
+                                   help='Generate per-individual copying rather than per-population copying')
+    all_runtime_group.add_argument('--log-file', "-l", "--l", required=False, default="run.log", metavar='run.log',
+                                   type=str,
+                                   help='File containing log information (default: %(default)s)', dest="log_file")
+    all_runtime_group.add_argument('--threads', "-t", required=False, default=4, metavar='N', type=int,
+                                   help='Number of concurrent threads (default: %(default)s)', dest="threads")
+    all_runtime_group.add_argument('--verbose', "-v", required=False, action="store_true",
+                                   help='Print program progress information on screen', dest="verbosity")
+
+    # Make the "haplotype" maker command
+    hapmake_parser = subparsers.add_parser('hapmake', help='Create haplotypes',
+                                           formatter_class=lambda prog: HelpFormatter(prog, width=120,
+                                                                                      max_help_position=120))
+    hapmake_parser.set_defaults(sub_command='hapmake')
+
+    hapmake_input_group = hapmake_parser.add_argument_group('Input options')
+    hapmake_input_group.add_argument('--map-dir', required=False, default=None, metavar='maps/', type=str,
+                                     help='Directory containing genetic maps: chr1.map, chr2.map, etc',
+                                     dest="map_dir")
+    hapmake_input_group.add_argument('--min-snps', required=False, default=7, metavar='MinSNPs', type=int,
+                                     help='Minimum number of SNPs in a haplotype block (default: %(default)s)',
+                                     dest="min_snps")
+    hapmake_input_group.add_argument('--max-snps', required=False, default=20, metavar='MaxSNPs', type=int,
+                                     help='Maximum number of SNPs in a haplotype block (default: %(default)s)',
+                                     dest="max_snps")
+    hapmake_input_group.add_argument('--max-rate', required=False, default=0.3, metavar='MaxRate', type=float,
+                                     help='Maximum recombination rate (default: %(default)s)',
+                                     dest="max_rate")
+
+    hapmake_output_group = hapmake_parser.add_argument_group('Output options')
+    hapmake_output_group.add_argument('--haplotypes', required=False, default="out.haplotypes",
+                                      metavar='out.haplotypes',
+                                      type=str,
+                                      help='Output file containing haplotypes (default: %(default)s)')
+
+    hapmake_runtime_group = hapmake_parser.add_argument_group('Runtime options')
+    hapmake_runtime_group.add_argument('--log-file', "-l", "--l", required=False, default="run.log", metavar='run.log',
+                                       type=str,
+                                       help='File containing log information (default: %(default)s)', dest="log_file")
+    hapmake_runtime_group.add_argument('--threads', "-t", required=False, default=4, metavar='N', type=int,
+                                       help='Number of concurrent threads (default: %(default)s)', dest="threads")
+    hapmake_runtime_group.add_argument('--verbose', "-v", required=False, action="store_true",
+                                       help='Print program progress information on screen', dest="verbosity")
+
+    # Make the "build" sub-command parser
     build_parser = subparsers.add_parser('build', help='Build reference set',
                                          formatter_class=lambda prog: HelpFormatter(prog, width=120,
                                                                                     max_help_position=120))
@@ -1353,11 +1566,18 @@ if __name__ == '__main__':
     build_output_group.add_argument('--reference-out', required=False, default=None, metavar='<OUTPUT>',
                                     help='The reference copying matrix output')
 
-    build_running_group = build_parser.add_argument_group('Running options')
-    build_running_group.add_argument('--per-individual', required=False, default=False, action='store_true',
+    build_runtime_group = build_parser.add_argument_group('Runtime options')
+    build_runtime_group.add_argument('--per-individual', required=False, default=False, action='store_true',
                                      help='Generate per-individual copying rather than per-population copying')
+    build_runtime_group.add_argument('--log-file', "-l", "--l", required=False, default="run.log", metavar='run.log',
+                                     type=str,
+                                     help='File containing log information (default: %(default)s)', dest="log_file")
+    build_runtime_group.add_argument('--threads', "-t", required=False, default=4, metavar='N', type=int,
+                                     help='Number of concurrent threads (default: %(default)s)', dest="threads")
+    build_runtime_group.add_argument('--verbose', "-v", required=False, action="store_true",
+                                     help='Print program progress information on screen', dest="verbosity")
 
-    # Make the query sub-command
+    # Make the "query" sub-command
     query_parser = subparsers.add_parser('query', help='Query reference set',
                                          formatter_class=lambda prog: HelpFormatter(prog, width=120,
                                                                                     max_help_position=120))
@@ -1375,7 +1595,16 @@ if __name__ == '__main__':
     query_output_group.add_argument('--combined-out', required=False, default=None, metavar='<OUTPUT>',
                                     help='The combined reference/query copying matrix output')
 
-    # Make the co-ancestry sub-command
+    query_runtime_group = query_parser.add_argument_group('Runtime options')
+    query_runtime_group.add_argument('--log-file', "-l", "--l", required=False, default="run.log", metavar='run.log',
+                                     type=str,
+                                     help='File containing log information (default: %(default)s)', dest="log_file")
+    query_runtime_group.add_argument('--threads', "-t", required=False, default=4, metavar='N', type=int,
+                                     help='Number of concurrent threads (default: %(default)s)', dest="threads")
+    query_runtime_group.add_argument('--verbose', "-v", required=False, action="store_true",
+                                     help='Print program progress information on screen', dest="verbosity")
+
+    # Make the "co-ancestry" sub-command
     coanc_parser = subparsers.add_parser('coanc', help='Individual v. individual co-ancestry',
                                          formatter_class=lambda prog: HelpFormatter(prog, width=120,
                                                                                     max_help_position=120))
@@ -1397,32 +1626,17 @@ if __name__ == '__main__':
     coanc_output_group.add_argument('--combined-out', required=False, default=None, metavar='<OUTPUT>',
                                     help='The all v. reference copying matrix output')
 
-    # Make the haplotype maker command
-    hapmake_parser = subparsers.add_parser('hapmake', help='Create haplotypes',
-                                           formatter_class=lambda prog: HelpFormatter(prog, width=120,
-                                                                                      max_help_position=120))
-    hapmake_parser.set_defaults(sub_command='hapmake')
+    coanc_runtime_group = coanc_parser.add_argument_group('Runtime options')
+    coanc_runtime_group.add_argument('--log-file', "-l", "--l", required=False, default="run.log", metavar='run.log',
+                                     type=str,
+                                     help='File containing log information (default: %(default)s)', dest="log_file")
+    coanc_runtime_group.add_argument('--threads', "-t", required=False, default=4, metavar='N', type=int,
+                                     help='Number of concurrent threads (default: %(default)s)', dest="threads")
+    coanc_runtime_group.add_argument('--verbose', "-v", required=False, action="store_true",
+                                     help='Print program progress information on screen', dest="verbosity")
 
-    hapmake_input_group = hapmake_parser.add_argument_group('Input options')
-    hapmake_input_group.add_argument('--map-dir', required=False, default=None, metavar='maps/', type=str,
-                                     help='Directory containing genetic maps: chr1.map, chr2.map, etc',
-                                     dest="map_dir")
-    hapmake_input_group.add_argument('--min-snps', required=False, default=7, metavar='MinSNPs', type=int,
-                                     help='Minimum number of SNPs in a haplotype block (default: %(default)s)',
-                                     dest="min_snps")
-    hapmake_input_group.add_argument('--max-snps', required=False, default=20, metavar='MaxSNPs', type=int,
-                                     help='Maximum number of SNPs in a haplotype block (default: %(default)s)',
-                                     dest="max_snps")
-    hapmake_input_group.add_argument('--max-rate', required=False, default=0.3, metavar='MaxRate', type=float,
-                                     help='Maximum recombination rate (default: %(default)s)',
-                                     dest="max_rate")
-    hapmake_output_group = hapmake_parser.add_argument_group('Output options')
-    hapmake_output_group.add_argument('--hap-file', required=False, default="out.haplotypes", metavar='out.haplotypes',
-                                      type=str,
-                                      help='Output file containing haplotypes (default: %(default)s)', dest="hap_file")
-
-    # Make the aggregate maker command
-    aggregate_parser = subparsers.add_parser('aggregate', help='Create haplotypes',
+    # Make the "aggregate" maker command
+    aggregate_parser = subparsers.add_parser('aggregate', help='Aggregate results and estimate ancestries',
                                              formatter_class=lambda prog: HelpFormatter(prog, width=120,
                                                                                         max_help_position=120))
     aggregate_parser.set_defaults(sub_command='aggregate')
@@ -1442,17 +1656,46 @@ if __name__ == '__main__':
     aggregate_output_group.add_argument('--out-prefix', required=False, default="pastrami", metavar='out-prefix',
                                         type=str, dest="out_prefix",
                                         help="""Output prefix for ancestry estimates files (default: %(default)s). 
-                                         Four files are created:\n 
-                                         * <prefix>_fractions.Q, \n
-                                         * <prefix>_paintings.Q,\n
-                                         * <prefix>_estimates.Q, \n
-                                         * <prefix>_fine_grain_estimates.Q\n""")
+                                         Four files are created: 
+                                         <prefix>_fractions.Q, 
+                                         <prefix>_paintings.Q, 
+                                         <prefix>_estimates.Q, 
+                                         <prefix>_fine_grain_estimates.Q\n""")
+
+    aggregate_runtime_group = aggregate_parser.add_argument_group('Runtime options')
+    aggregate_runtime_group.add_argument('--log-file', "-l", "--l", required=False, default="run.log",
+                                         metavar='run.log', type=str, dest="log_file",
+                                         help='File containing log information (default: %(default)s)')
+    aggregate_runtime_group.add_argument('--threads', "-t", required=False, default=4, metavar='N', type=int,
+                                         help='Number of concurrent threads (default: %(default)s)', dest="threads")
+    aggregate_runtime_group.add_argument('--verbose', "-v", required=False, action="store_true",
+                                         help='Print program progress information on screen', dest="verbosity")
 
     options, unknown_arguments = parser.parse_known_args()
+
+    if len(unknown_arguments) > 0:
+        print(Colors.HEADER)
+        print("User specificed unknown arguments: " + " ".join([str(x) for x in unknown_arguments]))
+        print("Please see the correct usage below:")
+        parser.print_help()
+        print(Colors.ENDC)
+        sys.exit(0)
 
     if options.help or "sub_command" not in options:
         print(Colors.HEADER)
         parser.print_help()
+        print(Colors.ENDC)
+        sys.exit(0)
+
+    if options.sub_command == 'all' and options.help:
+        print(Colors.HEADER)
+        all_parser.print_help()
+        print(Colors.ENDC)
+        sys.exit(0)
+
+    if options.sub_command == 'hapmake' and options.help:
+        print(Colors.HEADER)
+        hapmake_parser.print_help()
         print(Colors.ENDC)
         sys.exit(0)
 
@@ -1480,20 +1723,16 @@ if __name__ == '__main__':
         print(Colors.ENDC)
         sys.exit(0)
 
-    if options.sub_command == 'hapmake' and options.help:
-        print(Colors.HEADER)
-        hapmake_parser.print_help()
-        print(Colors.ENDC)
-        sys.exit(0)
-
     # Start the analysis
-    analysis = Analysis(options, unknown_arguments)
+    analysis = Analysis(options)
 
     analysis.validate_options()
 
     if len(analysis.errors) > 0:
         print(Colors.HEADER)
-        if options.sub_command == 'build':
+        if options.sub_command == 'all':
+            all_parser.print_help()
+        elif options.sub_command == 'build':
             build_parser.print_help()
         elif options.sub_command == 'query':
             query_parser.print_help()

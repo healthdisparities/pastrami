@@ -150,6 +150,23 @@ class Support:
 
     @staticmethod
     def merge_fam_files(infile1: str, infile2: str, outputfile: str):
+        """Merged two TFAM files into a single one (for aggregate function)
+
+        Parameters
+        ----------
+        infile1 : str
+            Input TFAM file #1 (e.g., reference TFAM file)
+
+        infile2: str
+            Input TFAM file #2 (e.g., query TFAM file)
+
+        outputfile: str
+            Output TFAM file
+
+        Returns
+        -------
+        None
+        """
         with open(outputfile, "w") as out_handle:
             with open(infile1, "r") as infile1_handle:
                 for line in infile1_handle:
@@ -159,8 +176,32 @@ class Support:
                     out_handle.write(line)
 
     @staticmethod
-    def create_pop_group_from_tfam(tfam_file: str):
-        pass
+    def create_pop_group_from_tfam(tfam_in_file: str, tsv_out_file: str):
+        """Takes unique population names from the input file and make them as group
+
+        Parameters
+        ----------
+        tfam_in_file : str
+            Input TFAM file
+
+        tsv_out_file: str
+            Output TSV file
+
+        Returns
+        -------
+        None
+        """
+        unique_populations = {}
+        with open(tfam_in_file, "r") as f_in:
+            for line in f_in:
+                pop = line.strip().split()[0]
+                unique_populations[pop] = True
+
+        unique_populations = sorted(unique_populations.keys())
+        with open(tsv_out_file, "r") as f_out:
+            f_out.write("#Population\tGroup\n")
+            for this_pop in unique_populations:
+                f_out.write(f"{this_pop}\t{this_pop}\n")
 
     @staticmethod
     def init_logger(log_file, verbosity):
@@ -396,7 +437,6 @@ class Analysis:
     def validate_and_set_all_subcommand_options(self):
         self.validate_reference_prefix()
         self.validate_query_prefix()
-        self.validate_pop_group_file()
 
         Support.validate_output_prefix(self.out_prefix)
 
@@ -407,6 +447,12 @@ class Analysis:
             else:
                 self.validate_map_dir()
                 self.haplotype_file = self.out_prefix + ".hap"
+
+        if self.pop_group_file is None:
+            self.pop_group_file = self.out_prefix+".pop_group.tsv"
+            Support.create_pop_group_from_tfam(tfam_in_file=self.reference_tfam_file, tsv_out_file=self.pop_group_file)
+        else:
+            self.validate_pop_group_file()
 
         self.reference_pickle_output_file = self.out_prefix + ".pickle"
         self.reference_output_file = self.out_prefix + ".hap"
@@ -546,7 +592,6 @@ class Analysis:
     """ 
         [Class section] Core Pastrami code - to be fragmented further in future
     """
-
     def load_reference_pickle(self):
         logging.info('Loading reference pickle ' + self.reference_pickle_file)
         pickle_file_handle = open(self.reference_pickle_file, 'rb')
@@ -591,7 +636,6 @@ class Analysis:
 
     @staticmethod
     def pull_chromosome_tped(prefix, chromosome, temp_dir):
-        # TODO: Create the files in a temporary directory
         # Pull the genotypes for a given chromosome from a given prefix
         chromosome_file_prefix = os.path.join(temp_dir, str(chromosome) + '.tmp')
         logging.info(f"Loading SNPs from chr{chromosome}")

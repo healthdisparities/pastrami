@@ -280,6 +280,7 @@ class Analysis:
         self.reference_individual_populations = None
         self.reference_population_counts = None
         self.query_copying_fractions = None
+        self.query_combined_file = None
         self.combined_copying_fractions = None
         self.reference_individuals = None
         self.reference_populations = None
@@ -358,7 +359,7 @@ class Analysis:
             self.haplotype_file = opts.haplotypes
             self.reference_prefix = opts.reference_prefix
             self.query_prefix = opts.query_prefix
-            self.refernce_output_file = opts.reference_out
+            self.reference_output_file = opts.reference_out
             self.query_output_file = opts.query_out
             self.query_combined_file = opts.combined_out
 
@@ -420,8 +421,70 @@ class Analysis:
         if len(self.analysis) == 0:
             self.errors = self.errors + ['Nothing to do!']
 
+    def __str__(self):
+        long_string = f"""
+        Class constants: 
+                chromosomes                   =  {Analysis.chromosomes}
+                fake_run                      =  {Analysis.fake_run}
+                debug                         =  {Analysis.debug}
+                min_haplotype_occurences      =  {Analysis.min_haplotype_occurences}
+                optim_step_size               =  {Analysis.optim_step_size}
+                error_threshold               =  {Analysis.error_threshold}
+                optim_iterations              =  {Analysis.optim_iterations}
+                tolerance                     =  {Analysis.tolerance}
+                ancestry_fraction_postfix     =  {Analysis.ancestry_fraction_postfix}
+                ancestry_painting_postfix     =  {Analysis.ancestry_painting_postfix}
+                pop_estimates_postfix         =  {Analysis.pop_estimates_postfix}
+                finegrain_estimates_postfix   =  {Analysis.finegrain_estimates_postfix}
+                
+        Instance variables:
+                * General program parameters
+                log_file                      =  {self.log_file}
+                threads                       =  {self.threads}
+                verbosity                     =  {self.verbosity}
+                * Verbosity options
+                command_verbosity             =  {self.command_verbosity}
+                main_process_verbosity        =  {self.main_process_verbosity}
+                sub_process_verbosity         =  {self.sub_process_verbosity}
+                warning_verbosity             =  {self.warning_verbosity}
+                * Subcommand to be executed
+                sub_command                   =  {self.sub_command}
+                * Hapmake-specific parameter options
+                max_rate                      =  {self.max_rate}
+                max_snps                      =  {self.max_snps}
+                min_snps                      =  {self.min_snps}
+                * Hapmake-specific input/output options
+                out_prefix                    =  {self.out_prefix}
+                map_dir                       =  {self.map_dir}
+                haplotype_file                =  {self.haplotype_file}
+                * Query files input/output options
+                query_prefix                  =  {self.query_prefix}
+                query_tfam_file               =  {self.query_tfam_file}
+                query_tped_file               =  {self.query_tped_file}
+                query_output_file             =  {self.query_output_file}
+                query_combined_file           =  {self.query_combined_file}
+                * Reference files input/output options
+                reference_prefix              =  {self.reference_prefix}
+                reference_tfam_file           =  {self.reference_tfam_file}
+                reference_tped_file           =  {self.reference_tped_file}
+                reference_output_file         =  {self.reference_output_file}
+                reference_pickle_output_file  =  {self.reference_pickle_output_file}
+                * Combined query-reference file location
+                combined_output_file          =  {self.combined_output_file}
+                * Aggregate-specific options
+                pop_group_file                =  {self.pop_group_file}
+                ancestry_infile               =  {self.ancestry_infile}
+                fam_infile                    =  {self.fam_infile}
+        """
+        return long_string
+
+    # TODO: Print a summary of what parameters were provided, what needs to be performed
+    def summarize_run(self):
+        logging.info(self.main_process_color + str(self) + Colors.ENDC)
+        logging.info(self.main_process_color + f"Analysis to perform: " + ",".join(self.analysis) + Colors.ENDC)
+
     def go(self):
-        logging.info(f"Analysis to perform: " + ",".join(self.analysis))
+        self.summarize_run()
         while True:
             step = self.analysis[0]
             self.analysis = self.analysis[1:]
@@ -625,7 +688,7 @@ class Analysis:
         self.haplotypes = pd.read_table(self.haplotype_file, index_col=None, header=None)
         self.haplotypes.columns = ['chromosome', 'left', 'right', 'cM']
         self.haplotypes = self.haplotypes.loc[self.haplotypes['chromosome'].apply(lambda x: x in self.chromosomes), :]
-        logging.info(f"Found f{self.haplotypes.shape[0]} haplotypes\n")
+        logging.info(f"Found {self.haplotypes.shape[0]} haplotypes\n")
 
     def load_query_tfam(self):
         self.query_tfam = pd.read_table(self.query_tfam_file, index_col=None, header=None, sep=' ')
@@ -752,7 +815,7 @@ class Analysis:
         for i in range(1, len(results)):
             self.reference_haplotype_fractions = pd.concat([self.reference_haplotype_fractions, results[i][1]], axis=0)
 
-        # Find the reference indvidiual-refernce population copying rates
+        # Find the reference indvidiual-reference population copying rates
         # Here the copying fraction across all of the haplotypes but scaled 0-1
         self.reference_copying_fractions = results[0][2]
         for i in range(1, len(results)):
@@ -1208,7 +1271,7 @@ class Analysis:
                 if ind_id not in self.ind_pop_map:
                     logging.error(f"Error: Individual id {ind_id} was not found in input file {self.ancestry_infile}")
                     sys.exit(1)
-                    
+
                 this_pop = self.ind_pop_map[ind_id]
                 if this_pop not in self.pop_ind_map:
                     self.pop_ind_map[this_pop] = []

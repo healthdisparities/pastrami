@@ -1205,7 +1205,10 @@ class Analysis:
                 fractions = [float(columns[x]) for x in indices]
 
                 # Populate the pop_ind_map dictionary of lists
-                # TODO: Catch cases when ind_id is not defined in the FAM file
+                if ind_id not in self.ind_pop_map:
+                    logging.error(f"Error: Individual id {ind_id} was not found in input file {self.ancestry_infile}")
+                    sys.exit(1)
+                    
                 this_pop = self.ind_pop_map[ind_id]
                 if this_pop not in self.pop_ind_map:
                     self.pop_ind_map[this_pop] = []

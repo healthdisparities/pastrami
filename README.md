@@ -30,6 +30,9 @@ source ~/.bashrc
 
 # Move the file to your local bin
 mv plink2 ~/bin
+
+# Make sure there is an executable by the name plink
+ln -s ~/bin/plink2 ~/bin/plink
 ```
 
 #### Native pip-based installation

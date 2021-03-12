@@ -196,7 +196,7 @@ Pastrami is designed in a way that the reference files can be processed once and
 ## combine the individual list for aggregate subcommand
 cat afro_ref.tfam my_query.tfam > input.tfam
 ## run the subcommand
-./pastrami.py aggregate --pop-group pop2group.txt --pastrami-output african.tsv --pastrami-fam input.tfam -v --threads 20 
+./pastrami.py aggregate --pop-group pop2group.txt --pastrami-output african.tsv --pastrami-fam input.tfam --out-prefix aggregate_output -v --threads 20 
 ```
 
 

@@ -17,6 +17,7 @@ import pickle
 import random
 import re
 import shlex
+import shutil
 import statistics
 import string
 import subprocess
@@ -88,8 +89,21 @@ class Support:
 
     # TODO: Implement checks for dependency progams
     @staticmethod
-    def check_dependencies():
-        pass
+    def check_dependencies(program_list: list = None) -> list:
+        errors = []
+        for program in program_list:
+            if shutil.which(program) is None:
+                errors.append(program)
+        return errors
+
+    @staticmethod
+    def find_plink_binary():
+        if shutil.which("plink") is not None:
+            return "plink"
+        elif shutil.which("plink2") is not None:
+            return "plink2"
+        else:
+            return None
 
     @staticmethod
     def run_command(command_str: str = None, command_list: list = None, shell=False):
@@ -270,6 +284,7 @@ class Analysis:
 
         # Sub-commands
         self.sub_command = opts.sub_command
+        self.plink_command = None
 
         self.ancestry_infile = None
         self.combined_copying_fractions = None
@@ -403,6 +418,13 @@ class Analysis:
     """
 
     def validate_options(self):
+
+        plink_command = Support.find_plink_binary()
+        if plink_command is None:
+            self.errors += ["Can't find plink or plink2. Please make sure the binary exists as one of those two names"]
+        else:
+            self.plink_command = plink_command
+
         if self.sub_command == "all":
             self.validate_and_set_all_subcommand_options()
             # self.analysis += ['build_reference_set', 'query_reference_set', 'build_coanc', 'post_pastrami']
@@ -724,12 +746,11 @@ class Analysis:
         self.query_individuals = self.query_tfam.index.values
         logging.info(f"Found {self.query_tfam.shape[0]} query individuals")
 
-    @staticmethod
-    def pull_chromosome_tped(prefix, chromosome, temp_dir):
+    def pull_chromosome_tped(self, prefix, chromosome, temp_dir):
         # Pull the genotypes for a given chromosome from a given prefix
         chromosome_file_prefix = os.path.join(temp_dir, str(chromosome) + '.tmp')
         logging.info(f"Loading SNPs from chr{chromosome}")
-        command = ['plink', '--tfile', prefix,
+        command = [self.plink_command, '--tfile', prefix,
                    '--recode transpose',
                    '--chr', str(chromosome),
                    '--out', chromosome_file_prefix,

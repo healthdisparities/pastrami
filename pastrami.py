@@ -251,6 +251,7 @@ class Analysis:
         self.threads = opts.threads
         self.log_file = opts.log_file
         self.verbosity = opts.verbosity
+        self.pool = None
 
         # Any errors we encounter
         self.errors = []
@@ -270,23 +271,38 @@ class Analysis:
         # Sub-commands
         self.sub_command = opts.sub_command
 
-        self.reference_tped_file = None
-        self.reference_tfam_file = None
-        self.query_tped_file = None
-        self.query_tfam_file = None
-        self.reference_tfam = None
-        self.query_tfam = None
-        self.haplotypes = None
-        self.reference_individual_populations = None
-        self.reference_population_counts = None
-        self.query_copying_fractions = None
-        self.query_combined_file = None
+        self.ancestry_infile = None
         self.combined_copying_fractions = None
-        self.reference_individuals = None
-        self.reference_populations = None
+        self.combined_output_file = None
+        self.fam_infile = None
+        self.haplotype_file = None
+        self.haplotypes = None
+        self.map_dir = None
+        self.max_rate = None
+        self.max_snps = None
+        self.min_snps = None
+        self.out_prefix = None
+        self.pop_group_file = None
+        self.query_combined_file = None
+        self.query_copying_fractions = None
+        self.query_output_file = None
+        self.query_prefix = None
+        self.query_tfam = None
+        self.query_tfam_file = None
+        self.query_tped_file = None
+        self.reference_copying_fractions = None
         self.reference_haplotype_counts = None
         self.reference_haplotype_fractions = None
-        self.reference_copying_fractions = None
+        self.reference_individual_populations = None
+        self.reference_individuals = None
+        self.reference_output_file = None
+        self.reference_pickle_output_file = None
+        self.reference_population_counts = None
+        self.reference_populations = None
+        self.reference_prefix = None
+        self.reference_tfam = None
+        self.reference_tfam_file = None
+        self.reference_tped_file = None
 
         # All sub-command options
         if self.sub_command == 'all':
@@ -389,7 +405,8 @@ class Analysis:
     def validate_options(self):
         if self.sub_command == "all":
             self.validate_and_set_all_subcommand_options()
-            self.analysis += ['build_reference_set', 'query_reference_set', 'build_coanc', 'post_pastrami']
+            # self.analysis += ['build_reference_set', 'query_reference_set', 'build_coanc', 'post_pastrami']
+            self.analysis += ['build_reference_set', 'query_reference_set', 'post_pastrami']
 
         if self.sub_command == 'hapmake':
             self.validate_map_dir()
@@ -485,6 +502,8 @@ class Analysis:
 
     def go(self):
         self.summarize_run()
+        # self.pool = mp.Pool(processes=self.threads)
+        self.pool = mp.ProcessingPool(nodes=self.threads)
         while True:
             step = self.analysis[0]
             self.analysis = self.analysis[1:]
@@ -492,6 +511,7 @@ class Analysis:
             function()
             if len(self.analysis) == 0:
                 break
+        # self.pool.terminate()
 
     """ 
         [Class section] Functions for validating file
@@ -512,7 +532,7 @@ class Analysis:
                 self.haplotype_file = self.out_prefix + ".hap"
 
         if self.pop_group_file is None:
-            self.pop_group_file = self.out_prefix+".pop_group.tsv"
+            self.pop_group_file = self.out_prefix + ".pop_group.tsv"
             Support.create_pop_group_from_tfam(tfam_in_file=self.reference_tfam_file, tsv_out_file=self.pop_group_file)
         else:
             self.validate_pop_group_file()
@@ -646,15 +666,22 @@ class Analysis:
 
     def make_haplotypes(self):
         logging.info(f"[hapmake|chrAll] Starting pool for processing")
-        pool = mp.Pool(processes=self.threads)
-        results = pool.map(self.process_hapmap_file, range(1, 23))
+        # pool = mp.Pool(processes=self.threads)
+        # self.pool.restart()
+        results = self.pool.map(self.process_hapmap_file, range(1, 23))
+        # results.wait()
+        # results = results.get()
         with open(self.haplotype_file, "w") as f:
             f.write("".join(results) + "\n")
         logging.info(f"[hapmake|chrAll] Files written")
+        # self.pool.close()
+        # self.pool.join()
+        # self.pool.terminate()
 
     """ 
         [Class section] Core Pastrami code - to be fragmented further in future
     """
+
     def load_reference_pickle(self):
         logging.info('Loading reference pickle ' + self.reference_pickle_file)
         pickle_file_handle = open(self.reference_pickle_file, 'rb')
@@ -688,7 +715,7 @@ class Analysis:
         self.haplotypes = pd.read_table(self.haplotype_file, index_col=None, header=None)
         self.haplotypes.columns = ['chromosome', 'left', 'right', 'cM']
         self.haplotypes = self.haplotypes.loc[self.haplotypes['chromosome'].apply(lambda x: x in self.chromosomes), :]
-        logging.info(f"Found {self.haplotypes.shape[0]} haplotypes\n")
+        logging.info(f"Found {self.haplotypes.shape[0]} haplotypes")
 
     def load_query_tfam(self):
         self.query_tfam = pd.read_table(self.query_tfam_file, index_col=None, header=None, sep=' ')
@@ -726,7 +753,7 @@ class Analysis:
         # TODO: Move the command to Support.run_command
         # Support.run_command(command_list=command)
         subprocess.check_output(" ".join(command), shell=True)
-
+        logging.info(f"Finished loading SNPs from chr{chromosome}")
         return chromosome_tped
 
     def load_reference_tpeds(self):
@@ -734,15 +761,22 @@ class Analysis:
         # print(self.chromosomes)
         temp_name = "pastrami_" + ''.join(random.choice(string.ascii_letters) for _ in range(10))
         Support.safe_dir_create(temp_name)
-        pool = mp.Pool(processes=self.threads)
-        results = pool.map(
+        logging.info(f"Loading reference TPEDs with {self.threads} threads")
+        # pool = mp.Pool(processes=self.threads)
+        # self.pool.restart()
+        results = self.pool.map(
             lambda x: self.pull_chromosome_tped(prefix=self.reference_prefix, chromosome=x, temp_dir=temp_name),
             self.chromosomes)
+        # results.wait()
+        # results = results.get()
+        # self.pool.close()
+        # self.pool.join()
+        # self.pool.terminate()
         Support.safe_dir_rm(temp_name)
         for i in range(len(self.chromosomes)):
             self.reference_tpeds[str(self.chromosomes[i])] = results[i]
             self.reference_tpeds[str(self.chromosomes[i])].columns = self.reference_individuals
-        logging.info(f"Loaded {len(self.reference_tpeds)} refernece TPEDs")
+        logging.info(f"Loaded {len(self.reference_tpeds)} referenece TPEDs")
 
     def load_query_tpeds(self):
         # Read in all of the reference TPEDs
@@ -750,10 +784,17 @@ class Analysis:
         logging.info(self.chromosomes)
         temp_name = "pastrami_" + ''.join(random.choice(string.ascii_letters) for _ in range(10))
         Support.safe_dir_create(temp_name)
-        pool = mp.Pool(processes=self.threads)
-        results = pool.map(
+        logging.info(f"Loading query TPEDs with {self.threads} threads")
+        # pool = mp.Pool(processes=self.threads)
+        # self.pool.restart()
+        results = self.pool.map(
             lambda x: self.pull_chromosome_tped(prefix=self.query_prefix, chromosome=x, temp_dir=temp_name),
             self.chromosomes)
+        # results.wait()
+        # results = results.get()
+        # self.pool.close()
+        # self.pool.join()
+        # self.pool.terminate()
         Support.safe_dir_rm(temp_name)
         for i in range(len(self.chromosomes)):
             self.query_tpeds[str(self.chromosomes[i])] = results[i]
@@ -796,13 +837,16 @@ class Analysis:
 
         del self.reference_tpeds
 
-        pool = mp.Pool(processes=self.threads)
-
         # Gives us back a list of lists
         # Dim 1 - Chunk
         # Dim 2 - Results of a chunk
-        results = pool.map(self.chunk_build_reference_copying_fractions, chunk_data)
-        pool.close()
+        # self.pool.restart()
+        results = self.pool.map(self.chunk_build_reference_copying_fractions, chunk_data)
+        # results.wait()
+        # results = results.get()
+        # self.pool.close()
+        # self.pool.join()
+        # self.pool.terminate()
 
         # Find the population counts for each reference haplotype
         self.reference_haplotype_counts = results[0][0]
@@ -956,12 +1000,14 @@ class Analysis:
         del self.query_tpeds
 
         logging.info("Calculating reference copying fractions...")
-        pool = mp.Pool(processes=self.threads)
-        results = pool.map_async(self.chunk_query_reference_copying_fractions, chunk_data)
-        results.wait()
-        results = results.get()
-        pool.close()
-        pool.join()
+        # pool = mp.Pool(processes=self.threads)
+        # self.pool.restart()
+        results = self.pool.map(self.chunk_query_reference_copying_fractions, chunk_data)
+        # results.wait()
+        # results = results.get()
+        # self.pool.close()
+        # self.pool.join()
+        # self.pool.terminate()
         logging.info("Reference copying fractions calculated")
         logging.info("Finding the query indvidiual-reference population copying rates...")
         # Find the query indvidiual-reference population copying rates
@@ -1021,22 +1067,25 @@ class Analysis:
         self.load_reference_tfam()
         self.load_query_tfam()
 
-        pool = mp.Pool(processes=self.threads)
-
+        # pool = mp.Pool(processes=self.threads)
+        # self.pool.restart()
         # For memory GIL BS, run each chromosome on its own
         copying_counts = pd.DataFrame(0, index=self.reference_individuals, columns=self.reference_individuals)
         haplotype_counts = pd.Series([0] * len(self.reference_individuals), index=self.reference_individuals)
 
+        # TODO: This can potentially be parallelized
         for chromosome in self.chromosomes:
 
             # Just the haps for this chromosome
             chromosome_haplotypes = self.haplotypes.loc[self.haplotypes.iloc[:, 0] == chromosome, :]
             temp_name = "pastrami_" + ''.join(random.choice(string.ascii_letters) for _ in range(10))
             Support.safe_dir_create(temp_name)
+            logging.info(f"Extracting reference TPEDs with {self.threads} threads for coanc")
             # Just the TPEDs for this chromosome
             reference_tped = self.pull_chromosome_tped(prefix=self.reference_prefix, chromosome=chromosome,
                                                        temp_dir=temp_name)
             reference_tped.columns = self.reference_individuals
+            logging.info(f"Extracting query TPEDs with {self.threads} threads for coanc")
             query_tped = self.pull_chromosome_tped(prefix=self.query_prefix, chromosome=chromosome,
                                                    temp_dir=temp_name)
             Support.safe_dir_rm(temp_name)
@@ -1077,16 +1126,18 @@ class Analysis:
             del reference_tped
             del query_tped
 
-            results = pool.map_async(self.chunk_build_coanc, chunk_data)
-            results.wait()
-            results = results.get()
+            results = self.pool.map(self.chunk_build_coanc, chunk_data)
+            # results.wait()
+            # results = results.get()
             for i in range(len(results)):
                 copying_counts += results[i][0]
                 haplotype_counts += results[i][1]
 
-        pool.close()
-        pool.join()
+        # self.pool.close()
+        # self.pool.join()
+        # self.pool.terminate()
         copying_counts = copying_counts.T.apply(lambda x: x / haplotype_counts).T
+        # TODO: Figure out what this aVA.tsv file is
         copying_counts.to_csv('aVA.tsv', sep='\t')
 
     def chunk_build_coanc(self, chunk_data):
@@ -1443,7 +1494,7 @@ class Analysis:
         penalty = error * penalty_multiplier
         # final unit that is to be minimized
         error_penalty = error + penalty
-        logging.debug(f"Error: {error}; Penalty: {penalty}; sum: {error_penalty}")
+        # logging.debug(f"Error: {error}; Penalty: {penalty}; sum: {error_penalty}")
         return error_penalty
 
     def regularize_this_row(self, row: str) -> list:
@@ -1479,8 +1530,14 @@ class Analysis:
             Sets self.fine_grain_estimates to the fine grain estimates calculated
         """
         logging.info(f"Beginning calculation of NNLS estimates")
-        pool = mp.Pool(processes=self.threads)
-        results = pool.map(self.regularize_this_row, self.ancestry_fractions.keys())
+        # pool = mp.Pool(processes=self.threads)
+        # self.pool.restart()
+        results = self.pool.map(self.regularize_this_row, self.ancestry_fractions.keys())
+        # results.wait()
+        # results = results.get()
+        # self.pool.close()
+        # self.pool.join()
+        # self.pool.terminate()
         logging.info(f"Finished all NNLS estimate calculations")
 
         ind_ids = list(self.ancestry_fractions.keys())

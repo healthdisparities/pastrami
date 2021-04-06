@@ -3,13 +3,15 @@
 
 __author__ = "Andrew Conley, Lavanya Rishishwar"
 __copyright__ = "Copyright 2021, Andrew Conley, Lavanya Rishishwar"
-__credits__ = ["Andrew Conely", "Lavanya Rishishwar"]
+__credits__ = ["Andrew Conely", "Lavanya Rishishwar", "Shivam Sharma", "Emily Norris"]
 __license__ = "GPL"
-__version__ = "0.2"
+__version__ = "0.3"
 __maintainer__ = "Andrew Conley, Lavanya Rishishwar"
 __email__ = "aconley@ihrc.com; lrishishwar@ihrc.com"
 __status__ = "Development"
+__title__ = "pastrami.py"
 
+# Standard modules
 import logging
 import math
 import os.path
@@ -24,13 +26,32 @@ import subprocess
 import sys
 from argparse import ArgumentParser, HelpFormatter
 
-import numpy as np
-import pandas as pd
-import pathos.multiprocessing as mp
-from scipy.optimize import minimize
 
-VERSION = 0.1
-PROGRAM_NAME = "pastrami.py"
+py_version = sys.version_info
+if py_version[0] < 3 or py_version[1] < 4:
+    sys.exit(f"Error: {__title__} requires Python version 3.4+ to work. Please install a newer version of Python.")
+
+
+# Additional installs
+try:
+    import numpy as np
+except ModuleNotFoundError as err:
+    sys.exit(f"Error: Numpy not found. Please install numpy prior to running {__title__}")
+try:
+    from scipy.optimize import minimize
+except ModuleNotFoundError as err:
+    sys.exit(f"Error: Scipy not found. Please install scipy prior to running {__title__}")
+try:
+    import pandas as pd
+except ModuleNotFoundError as err:
+    sys.exit(f"Error: Pandas not found. Please install pandas prior to running {__title__}")
+try:
+    import pathos.multiprocessing as mp
+except ModuleNotFoundError as err:
+    sys.exit(f"Error: Pathos not found. Please install pathos prior to running {__title__}")
+
+VERSION = __version__
+PROGRAM_NAME = __title__
 
 
 class Colors:
@@ -259,6 +280,7 @@ class Analysis:
     ancestry_painting_postfix = "_paintings.Q"
     pop_estimates_postfix = "_estimates.Q"
     finegrain_estimates_postfix = "_fine_grain_estimates.Q"
+    program_list = {'required': ["plink"]}
 
     def __init__(self, opts):
         # General attributes

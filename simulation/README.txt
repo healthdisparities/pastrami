@@ -1,1 +1,0 @@
-Purpose of this project: Genetic simulations procedure that will be used across multiple projects

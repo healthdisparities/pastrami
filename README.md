@@ -187,7 +187,7 @@ Pastrami is designed in a way that the reference files can be processed once and
 # This step shouldn't take more than a few seconds, the remaining step will be time consuming in nature
 
 # step 2: build database (pickle file)
-./pastrami.py build --reference-pickle african.pickle --reference-prefix afro_ref --haplotype african.hap -v --threads 20
+./pastrami.py build --reference-pickle african.pickle --reference-prefix afro_ref --haplotypes african.hap -v --threads 20
 # african.pickle is the output file
 
 # step 3: querying the database

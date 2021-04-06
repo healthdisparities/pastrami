@@ -26,11 +26,9 @@ import subprocess
 import sys
 from argparse import ArgumentParser, HelpFormatter
 
-
 py_version = sys.version_info
 if py_version[0] < 3 or py_version[1] < 4:
     sys.exit(f"Error: {__title__} requires Python version 3.4+ to work. Please install a newer version of Python.")
-
 
 # Additional installs
 try:
@@ -69,9 +67,9 @@ class Support:
     @staticmethod
     def error_out(message: str = None):
         if message is not None:
-            sys.exit(f"Error: {message}")
+            sys.exit(Colors.FAIL + f"Error: {message}" + Colors.ENDC)
         else:
-            sys.exit("The program encountered an error and has to exit.")
+            sys.exit(Colors.FAIL + "The program encountered an error and has to exit." + Colors.ENDC)
 
     @staticmethod
     def validate_file(the_file: str):
@@ -89,12 +87,12 @@ class Support:
                                         presence_suffix: str = 'doesn\'t exist',
                                         size_suffix: str = 'is size 0', fake_run: bool = False):
         if not Support.validate_file(the_file=the_file) and not fake_run:
-            print(' '.join([error_prefix, the_file, presence_suffix]), 0, Colors.FAIL)
-            Support.error_out()
+            error_message = ' '.join([error_prefix, the_file, presence_suffix])
+            Support.error_out(message=error_message)
 
         if not Support.validate_file_size(the_file=the_file) and not fake_run:
-            print(' '.join([error_prefix, the_file, size_suffix]), 0, Colors.FAIL)
-            Support.error_out()
+            error_message = ' '.join([error_prefix, the_file, size_suffix])
+            Support.error_out(message=error_message)
 
     @staticmethod
     def validate_dir(the_dir: str):
@@ -105,8 +103,8 @@ class Support:
     def validate_dir_or_error(the_dir: str, error_prefix: str = "The dir", presence_suffix: str = "doesn't exist",
                               fake_run: bool = False):
         if not Support.validate_dir(the_dir=the_dir) and not fake_run:
-            print(' '.join([error_prefix, the_dir, presence_suffix]), 0, Colors.FAIL)
-            Support.error_out()
+            error_message = ' '.join([error_prefix, the_dir, presence_suffix])
+            Support.error_out(message=error_message)
 
     # TODO: Implement checks for dependency progams
     @staticmethod
@@ -1988,6 +1986,6 @@ if __name__ == '__main__':
         print("\n".join(analysis.errors))
         print(Colors.ENDC)
         sys.exit()
-
+    
     # If we're still good, start the actual analysis
     analysis.go()

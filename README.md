@@ -1,8 +1,9 @@
 # Pastrami
 Pastrami is a novel, scalable computational algorithm for rapid human ancestry estimation at population-, subcontinental- and continental-levels.  Pastrami works on two key methodologies: exact haplotype matching and non-negative least square (NNLS) optimization.
 
-Codebase stage: development
-Developers and maintainers: Andrew Conley, Lavanya Rishishwar
+Codebase stage: development  
+Developers and maintainers: Andrew Conley, Lavanya Rishishwar, Shivam Sharma  
+Testers: Lavanya Rishishwar, Shivam Sharma, Emily Norris  
 
 ## Installation
 We are working on improving the user experience with Pastrami.  This section will be updated in near future with easier installation procedure for pastrami and it's dependencies.

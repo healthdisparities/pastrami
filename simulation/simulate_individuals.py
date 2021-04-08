@@ -12,14 +12,13 @@ __email__ = "lavanyarishishwar@gmail.com"
 __status__ = "Development"
 
 import logging
-import math
 import random
 import re
-import shlex
-import statistics
 import sys
 import os
 import pandas as pd
+import subprocess
+import shlex
 from argparse import ArgumentParser, HelpFormatter
 
 VERSION = 0.1
@@ -206,9 +205,12 @@ class Simulation:
             logging.info(f"Simulating individual number {sim_i}")
             this_trace1 = []
             this_trace2 = []
-            random_inds = []
+            random_inds = []  # Individuals that will be used as "parents" for this individual
             pop_to_ind = {}
+
+            # Go through each reference population
             for this_pop in self.ref_pops:
+                # Pull a random individual from the reference population
                 random_ind = random.choice(self.ref_tfam[this_pop])
                 random_inds.append(random_ind)
                 if this_pop not in self.ref_for_sim_tfam:
@@ -238,19 +240,6 @@ class Simulation:
                 start = self.haplotypes[i][1]
                 stop = self.haplotypes[i][2]
 
-                # this_hap1 = self.ref_tped[source_pop1][source_ind1][(self.ref_tped[source_pop1]["chr"] == chrom) &
-                #                                                     self.ref_tped[source_pop1]["position"].between(
-                #                                                         start, stop)]
-                # if (start > 752721) & (stop < 861808):
-                #     print(f"{chrom}:{start}-{stop}")
-                #     print(self.ref_tped[source_pop1][source_ind1][(self.ref_tped[source_pop1]["chr"] == chrom) &
-                #                                                   self.ref_tped[source_pop1]["position"].between(
-                #                                                       start, stop)])
-                # if len(this_hap1) == 0:
-                #     continue
-                # this_hap2 = self.ref_tped[source_pop2][source_ind2][(self.ref_tped[source_pop2]["chr"] == chrom) &
-                #                                                     self.ref_tped[source_pop2]["position"].between(
-                #                                                         start, stop)]
                 if stop != -1:
                     this_hap1 = self.ref_tped[source_pop1][source_ind1][
                                     self.ref_tped[source_pop1]["chr"] == chrom].iloc[
@@ -266,16 +255,13 @@ class Simulation:
                                     self.ref_tped[source_pop2]["chr"] == chrom].iloc[
                                 start:]
                 logging.debug(f"For {chrom}:{start}-{stop}, I pulled {this_hap1.shape[0]}")
-                # print(this_hap1)
+
                 this_ind_tped1 = pd.concat([this_ind_tped1, this_hap1])
                 this_ind_tped2 = pd.concat([this_ind_tped2, this_hap2])
-            # print(this_ind_tped1)
+
             print(this_ind_tped1.shape[0])
             this_ind_tped1.reset_index(drop=True, inplace=True)
             this_ind_tped2.reset_index(drop=True, inplace=True)
-
-            # this_ind_tped1 = this_ind_tped1[~this_ind_tped1.index.duplicated(keep='first')]
-            # this_ind_tped2 = this_ind_tped2[~this_ind_tped2.index.duplicated(keep='first')]
 
             self.simulated_tfam.append(["SIM", f"SIM{sim_i}.1"])
             self.simulated_tfam.append(["SIM", f"SIM{sim_i}.2"])
@@ -293,18 +279,48 @@ class Simulation:
 
     def write_sim_ind(self):
         logging.info(f"Writing simulated reference file ref_{self.out_prefix}.tfam")
-        simulated_ref = self.ref_tped[self.ref_pops[0]].loc[:, ['chr', 'snp', 'sex', 'position']]
-        with open(f"ref_{self.out_prefix}.tfam", "w") as ref:
-            for this_pop in self.ref_for_sim_tfam:
-                for this_ind in self.ref_for_sim_tfam[this_pop]:
-                    ref.write(f"{this_pop} {this_ind} 0 0 0 -9\n")
-                    this_ind = re.sub(pattern=r"\.[12]", repl="", string=this_ind)
-                    simulated_ref[this_ind + ".1_A"] = self.ref_tped[this_pop][this_ind + ".1_A"]
-                    simulated_ref[this_ind + ".1_B"] = self.ref_tped[this_pop][this_ind + ".1_B"]
-                    simulated_ref[this_ind + ".2_A"] = self.ref_tped[this_pop][this_ind + ".2_A"]
-                    simulated_ref[this_ind + ".2_B"] = self.ref_tped[this_pop][this_ind + ".2_B"]
-        logging.info(f"Writing simulated reference file ref_{self.out_prefix}.tped")
-        simulated_ref.to_csv(f"ref_{self.out_prefix}.tped", header=None, index=None, sep=' ', mode='w')
+        # simulated_ref = self.ref_tped[self.ref_pops[0]].loc[:, ['chr', 'snp', 'sex', 'position']]
+        # with open(f"ref_{self.out_prefix}.tfam", "w") as ref:
+        #     for this_pop in self.ref_for_sim_tfam:
+        #         for this_ind in self.ref_for_sim_tfam[this_pop]:
+        #             ref.write(f"{this_pop} {this_ind} 0 0 0 -9\n")
+        #             this_ind = re.sub(pattern=r"\.[12]", repl="", string=this_ind)
+        #             simulated_ref[this_ind + ".1_A"] = self.ref_tped[this_pop][this_ind + ".1_A"]
+        #             simulated_ref[this_ind + ".1_B"] = self.ref_tped[this_pop][this_ind + ".1_B"]
+        #             simulated_ref[this_ind + ".2_A"] = self.ref_tped[this_pop][this_ind + ".2_A"]
+        #             simulated_ref[this_ind + ".2_B"] = self.ref_tped[this_pop][this_ind + ".2_B"]
+        # logging.info(f"Writing simulated reference file ref_{self.out_prefix}.tped")
+        # simulated_ref.to_csv(f"ref_{self.out_prefix}.tped", header=None, index=None, sep=' ', mode='w')
+        tfam_cmd = f"bash -c \" cat {os.path.join(self.dir, self.ref_pops[0])}.tfam "
+        tped_cmd = f"bash -c \" paste -d' ' {os.path.join(self.dir, self.ref_pops[0])}.tped "
+        for this_pop in self.ref_pops[1:]:
+            file = os.path.join(self.dir, this_pop)
+            tped_cmd += f" <(cut -f5- -d' ' {file}.tped) "
+            tfam_cmd += f" {file}.tfam "
+        tped_cmd += f"> ref_{self.out_prefix}.tped \""
+        tfam_cmd += f"> ref_{self.out_prefix}.tfam \""
+
+        logging.debug(f"Running: \n{tped_cmd}\n")
+        try:
+            proc = subprocess.Popen(tped_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    shell=True, universal_newlines=True)
+            proc.communicate()
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Encountered an error executing the command: ")
+            logging.error(f"Error details:")
+            logging.error(f"Exit code={e.returncode}")
+            logging.error(f"Error message={e.output}")
+
+        logging.debug(f"Running: \n{tfam_cmd}\n")
+        try:
+            proc = subprocess.Popen(tfam_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    shell=True, universal_newlines=True)
+            proc.communicate()
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Encountered an error executing the command: ")
+            logging.error(f"Error details:")
+            logging.error(f"Exit code={e.returncode}")
+            logging.error(f"Error message={e.output}")
 
         logging.info(f"Writing simulated query file query_{self.out_prefix}.tfam")
         with open(f"query_{self.out_prefix}.tfam", "w") as query:

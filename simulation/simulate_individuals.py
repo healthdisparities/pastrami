@@ -18,7 +18,6 @@ import sys
 import os
 import pandas as pd
 import subprocess
-import shlex
 from argparse import ArgumentParser, HelpFormatter
 
 VERSION = 0.1
@@ -205,34 +204,33 @@ class Simulation:
             logging.info(f"Simulating individual number {sim_i}")
             this_trace1 = []
             this_trace2 = []
-            random_inds = []  # Individuals that will be used as "parents" for this individual
             pop_to_ind = {}
-
-            # Go through each reference population
-            for this_pop in self.ref_pops:
-                # Pull a random individual from the reference population
-                random_ind = random.choice(self.ref_tfam[this_pop])
-                random_inds.append(random_ind)
-                if this_pop not in self.ref_for_sim_tfam:
-                    self.ref_for_sim_tfam[this_pop] = {}
-                self.ref_for_sim_tfam[this_pop][random_ind] = True
-                pop_to_ind[random_ind] = this_pop
 
             # 1 and 2 for each chrom haplotype
             this_ind_tped1 = pd.Series([], dtype=pd.Int8Dtype())
             this_ind_tped2 = pd.Series([], dtype=pd.Int8Dtype())
-            logging.info(f"Individuals selected in this draw: {random_inds}")
             for i in range(len(self.haplotypes)):
-                source_ind1 = random.choices(random_inds, cum_weights=self.ref_percs, k=len(self.ref_percs))[0]
-                source_ind2 = random.choices(random_inds, cum_weights=self.ref_percs, k=len(self.ref_percs))[0]
+                random_inds = []  # Individuals that will be used as "parents" for this individual
+                # Go through each reference population
+                for this_pop in self.ref_pops:
+                    # Pull a random individual from the reference population
+                    random_ind = random.choice(self.ref_tfam[this_pop])
+                    random_inds.append(random_ind)
+                    if this_pop not in self.ref_for_sim_tfam:
+                        self.ref_for_sim_tfam[this_pop] = {}
+                    self.ref_for_sim_tfam[this_pop][random_ind] = True
+                    pop_to_ind[random_ind] = this_pop
 
-                # logging.info(f"Individuals pulled for haplotype {i + 1}: {source_ind1} and {source_ind2}")
+                source_ind1 = random.choices(random_inds, cum_weights=self.ref_percs, k=1)[0]
+                source_ind2 = random.choices(random_inds, cum_weights=self.ref_percs, k=1)[0]
+
+                logging.debug(f"Individuals pulled for haplotype {i + 1}: {source_ind1} and {source_ind2}")
 
                 source_pop1 = pop_to_ind[source_ind1]
                 source_pop2 = pop_to_ind[source_ind2]
                 # TODO: randomize chromosome selection (.1_A or .2_A)
                 source_ind1 = re.sub(r"\.[12]", ".1_A", source_ind1)
-                source_ind2 = re.sub(r"\.[12]", ".1_A", source_ind2)
+                source_ind2 = re.sub(r"\.[12]", ".2_A", source_ind2)
                 this_trace1.append(f"{source_pop1}/{source_ind1}")
                 this_trace2.append(f"{source_pop2}/{source_ind2}")
 

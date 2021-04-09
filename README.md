@@ -40,7 +40,7 @@ ln -s ~/bin/plink2 ~/bin/plink
 Assuming Plink/Plink2 is available system-wide, the following commands will install the python modules and clone the git repo
 ```
 # Install python modules
-pip install pathos numpy pandas
+pip install pathos numpy scipy pandas
 
 # Download Pastrami
 git clone https://github.com/healthdisparities/pastrami

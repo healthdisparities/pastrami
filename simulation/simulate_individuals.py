@@ -186,6 +186,7 @@ class Simulation:
                 for line in f:
                     family_id, ind_id, father, mother, sex, pheno = line.rstrip().split()
                     self.ref_tfam[this_pop].append(ind_id)
+                    logging.debug(f"For pop {this_pop}, added {ind_id}")
                     this_col_names += [ind_id + "_A", ind_id + "_B"]
 
             logging.info(f"Reading {file}.tped")
@@ -216,13 +217,13 @@ class Simulation:
                     # Pull a random individual from the reference population
                     random_ind = random.choice(self.ref_tfam[this_pop])
                     random_inds.append(random_ind)
-                    if this_pop not in self.ref_for_sim_tfam:
-                        self.ref_for_sim_tfam[this_pop] = {}
-                    self.ref_for_sim_tfam[this_pop][random_ind] = True
+                    # if this_pop not in self.ref_for_sim_tfam:
+                    #     self.ref_for_sim_tfam[this_pop] = {}
+                    # self.ref_for_sim_tfam[this_pop][random_ind] = True
                     pop_to_ind[random_ind] = this_pop
 
-                source_ind1 = random.choices(random_inds, cum_weights=self.ref_percs, k=1)[0]
-                source_ind2 = random.choices(random_inds, cum_weights=self.ref_percs, k=1)[0]
+                source_ind1 = random.choices(random_inds, weights=self.ref_percs, k=1)[0]
+                source_ind2 = random.choices(random_inds, weights=self.ref_percs, k=1)[0]
 
                 logging.debug(f"Individuals pulled for haplotype {i + 1}: {source_ind1} and {source_ind2}")
 

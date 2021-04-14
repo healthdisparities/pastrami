@@ -1397,6 +1397,9 @@ class Analysis:
                     self.ancestry_fractions[ind_id][i] = 0
                 row_sum += self.ancestry_fractions[ind_id][i]
             # Row sum scaling
+            # TODO: Check why row_sum is 0 in some cases
+            if row_sum == 0:
+                row_sum = 1
             for i in range(len(self.af_header)):
                 self.ancestry_fractions[ind_id][i] = self.ancestry_fractions[ind_id][i] / row_sum
         logging.info("Ancestry fractions processed")

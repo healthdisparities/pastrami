@@ -53,6 +53,7 @@ class Simulation:
 
         self.simulated_tfam = []
         self.simulated_tped = pd.DataFrame()
+        self.simulated_fractions = {}
         self.ref_for_sim_tfam = {}
         self.trace = []  # will store tracing of how we made individuals
         self.ref_sub_tfam = None
@@ -145,6 +146,7 @@ class Simulation:
         self.read_ref_pops()
         self.simulate_ind()
         self.write_sim_ind()
+        self.write_genomic_fractions()
 
     def read_haplotype_file(self):
         logging.info("Opening haplotype file")
@@ -205,6 +207,8 @@ class Simulation:
             logging.info(f"Simulating individual number {sim_i}")
             this_trace1 = []
             this_trace2 = []
+            genome_avg = {x: 0 for x in self.ref_pops}
+            genome_avg["total"] = 0
             pop_to_ind = {}
 
             # 1 and 2 for each chrom haplotype
@@ -229,9 +233,16 @@ class Simulation:
 
                 source_pop1 = pop_to_ind[source_ind1]
                 source_pop2 = pop_to_ind[source_ind2]
+
+                genome_avg[source_pop1] += 1
+                genome_avg[source_pop2] += 1
+                genome_avg["total"] += 2
+
                 # TODO: randomize chromosome selection (.1_A or .2_A)
                 source_ind1 = re.sub(r"\.[12]", ".1_A", source_ind1)
                 source_ind2 = re.sub(r"\.[12]", ".2_A", source_ind2)
+
+                # TODO: decide if it's even worth tracking this or if genome average is sufficient
                 this_trace1.append(f"{source_pop1}/{source_ind1}")
                 this_trace2.append(f"{source_pop2}/{source_ind2}")
 
@@ -261,6 +272,9 @@ class Simulation:
             print(this_ind_tped1.shape[0])
             this_ind_tped1.reset_index(drop=True, inplace=True)
             this_ind_tped2.reset_index(drop=True, inplace=True)
+
+            self.simulated_fractions[f"SIM{sim_i}"] = {x: genome_avg[x] * 100 / genome_avg["total"] for x in
+                                                       self.ref_pops}
 
             self.simulated_tfam.append(["SIM", f"SIM{sim_i}.1"])
             self.simulated_tfam.append(["SIM", f"SIM{sim_i}.2"])
@@ -327,6 +341,13 @@ class Simulation:
                 query.write(f"{entry[0]} {entry[1]} 0 0 0 -9\n")
         logging.info(f"Writing simulated query file query_{self.out_prefix}.tped")
         self.simulated_tped.to_csv(f"query_{self.out_prefix}.tped", header=False, index=False, sep=' ', mode='w')
+
+    def write_genomic_fractions(self):
+        logging.info(f"Writing simulated ancestry fractions to query_{self.out_prefix}.simfrac.tsv")
+        with open(f"query_{self.out_prefix}.simfrac.tsv", "w") as f:
+            f.write("Ind\t" + "\t".join(self.ref_pops) + "\n")
+            for ind in self.simulated_fractions:
+                f.write(f"{ind}\t" + "\t".join([str(self.simulated_fractions[ind][x]) for x in self.ref_pops]) + "\n")
 
 
 if __name__ == '__main__':

@@ -271,7 +271,7 @@ class Analysis:
     debug = True
     min_haplotype_occurences = 0
     optim_step_size = 0.0001
-    error_threshold = 1e-5
+    error_threshold = 1e-8
     optim_iterations = 10
     tolerance = 1e-8
     ancestry_fraction_postfix = "_fractions.Q"
@@ -1556,13 +1556,47 @@ class Analysis:
             may produce sub-optimal results.
         """
         logging.info(f"Optimizing {row}")
-        par = np.array([1 / len(self.painting_vectors)] * len(self.painting_vectors))
         data = np.array(self.ancestry_fractions[row])
+
+        # default set to be same as data
+        par = data
         this_estimate = minimize(fun=self.regularized_rss, args=data, x0=par, method='L-BFGS-B',
                                  bounds=[(0, 1) for _ in range(len(par))],
                                  options={'eps': Analysis.optim_step_size, 'maxiter': Analysis.optim_iterations},
                                  tol=Analysis.tolerance)
-        logging.info(f"Optimized penalty for {row}: " + str(this_estimate["fun"]))
+        logging.info(f"Optimized penalty for {row} (def case): " + str(this_estimate["fun"]))
+
+        if this_estimate["fun"] <= Analysis.error_threshold:
+            return this_estimate["x"]
+
+        # case 2: equally weighted
+        par = np.array([1 / len(self.painting_vectors)] * len(self.painting_vectors))
+        new_estimate = minimize(fun=self.regularized_rss, args=data, x0=par, method='L-BFGS-B',
+                                bounds=[(0, 1) for _ in range(len(par))],
+                                options={'eps': Analysis.optim_step_size, 'maxiter': Analysis.optim_iterations},
+                                tol=Analysis.tolerance)
+        if new_estimate["fun"] <= Analysis.error_threshold:
+            return new_estimate["x"]
+        
+        if new_estimate["fun"] < this_estimate["fun"]:
+            this_estimate = new_estimate
+        logging.info(f"Optimized penalty for {row} (case 2): " + str(this_estimate["fun"]))
+
+        # case 3: try some additional random runs
+        for iteration in range(len(self.painting_vectors)):
+            par = np.random.dirichlet(np.ones(len(self.painting_vectors)),size=1)[0]
+            new_estimate = minimize(fun=self.regularized_rss, args=data, x0=par, method='L-BFGS-B',
+                                    bounds=[(0, 1) for _ in range(len(par))],
+                                    options={'eps': Analysis.optim_step_size, 'maxiter': Analysis.optim_iterations},
+                                    tol=Analysis.tolerance)
+            
+            if new_estimate["fun"] <= Analysis.error_threshold:
+                return new_estimate["x"]
+            
+            if new_estimate["fun"] < this_estimate["fun"]:
+                this_estimate = new_estimate
+            logging.info(f"Optimized penalty for {row} (case 3, iteration {iteration}): " + str(new_estimate["fun"]))
+
         return this_estimate["x"]
 
     def get_fine_grain_estimates(self):

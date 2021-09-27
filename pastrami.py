@@ -277,6 +277,8 @@ class Analysis:
     ancestry_fraction_postfix = "_fractions.Q"
     ancestry_painting_postfix = "_paintings.Q"
     pop_estimates_postfix = "_estimates.Q"
+    outsourced_optimizer_pop_estimates_postfix = "_outsourcedOptimizer_estimates.Q"
+
     finegrain_estimates_postfix = "_fine_grain_estimates.Q"
     program_list = {'required': ["plink"]}
 
@@ -1610,14 +1612,56 @@ class Analysis:
         logging.info(f"Beginning calculation of NNLS estimates")
         # pool = mp.Pool(processes=self.threads)
         # self.pool.restart()
-        results = self.pool.map(self.regularize_this_row, self.ancestry_fractions.keys())
+        
+        ### The following line initiates the original Pastrami optimizer function. 
+        #results = self.pool.map(self.regularize_this_row, self.ancestry_fractions.keys())
+        
         # results.wait()
         # results = results.get()
         # self.pool.close()
         # self.pool.join()
         # self.pool.terminate()
         logging.info(f"Finished all NNLS estimate calculations")
+        
+        #Outosurcing the same information to an R optimizer. 
+        #R optimizer gives us more accurate optimization results.
+        logging.info(f"Optimizing the same estimates using an outsourced R optimizer.")
+        outsourcing_command_list = ["Rscript", "outsourcedOptimizer.R", "-p", self.out_prefix + Analysis.ancestry_painting_postfix,
+                               "-f",  self.out_prefix + Analysis.ancestry_fraction_postfix,
+                               "-o", self.out_prefix + Analysis.outsourced_optimizer_pop_estimates_postfix]
+        
+        try:
+            logging.info(f"Attempting to run: {' '.join(outsourcing_command_list)}")
+            output = subprocess.check_output(outsourcing_command_list)
 
+        except subprocess.CalledProcessError as e:
+            #Outsourcing failed.
+            logging.error(f"Encountered an error executing the command: {outsourcing_command_list}")
+            logging.error(f"Exit code={e.returncode}")
+            logging.error(f"Error message={e.output}")
+        
+        logging.info(f"Finished all outsourced optimizations.")
+        #R outsourcing optimizer worked!        
+        
+        #Now let's incorporate the outsourced optimzer numbers back to the results variable.
+        with open(self.out_prefix + Analysis.outsourced_optimizer_pop_estimates_postfix) as f:
+            outsourced_optimizer_file_content = f.read()
+        
+        '''
+        Convert the outsourced optimizer matrix into a list of np array 
+        This should be similar to the results list varibale declared above in this function.   
+        The TSV file created by outsourced optimizer is transformed to the following variable ([sample1, sample2, ...] for 4 populations):
+            [array([0.      , 0.432669, 0.      , 0.567331]), array([0.      , 0.335317, 0.      , 0.664683]), ... ]
+        '''
+        outsourced_optimizer_results = [np.array([0 if (j == "NA" or not j.replace(".","").isdigit()) else float(j) for j in i.split("\t")[1:]], dtype='float') for i in outsourced_optimizer_file_content.split("\n")[1:] if i != ""]
+        
+        #Put the results back to the original results variable of this function.
+        results = outsourced_optimizer_results
+        
+        #Delete the outsourced optimizer variables.
+        del outsourced_optimizer_file_content, outsourced_optimizer_results
+        
+        #Carry on with the standard Pastrami code.
         ind_ids = list(self.ancestry_fractions.keys())
         for i in range(len(ind_ids)):
             this_sum = sum(results[i])

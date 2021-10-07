@@ -40,6 +40,7 @@ class Simulation:
         # General attributes
         self.ref_pops = opts.ref_pops
         self.ref_percs = opts.ref_percs
+        self.random_percs = opts.random_percs
         self.log_file = opts.log_file
         self.verbose = opts.verbose
         self.hap_file = opts.hap_file
@@ -210,7 +211,24 @@ class Simulation:
             genome_avg = {x: 0 for x in self.ref_pops}
             genome_avg["total"] = 0
             pop_to_ind = {}
-
+            
+            #Check if random percentages were requested.
+            if self.random_percs == True:
+                #Define upper and lower limits for random percentage generation.
+                random_perc_upper_limit = int((100/len(self.ref_pops)) + (10/len(self.ref_pops)*3))
+                random_perc_lower_limit = int((100/len(self.ref_pops)) - (10/len(self.ref_pops)*3))
+                
+                #Define the random percenatges.
+                random_percs = [random.randint(random_perc_lower_limit,random_perc_upper_limit) for i in range(len(self.ref_pops) - 1)]
+                random_percs.append(100-sum(random_percs))
+                
+                #Put to self object.
+                self.ref_percs = random_percs
+                for i in range(len(self.ref_percs)):
+                    self.ref_percs[i] /= 100
+                    
+                logging.info(f"Random percentages were requested, we generated {self.ref_percs} for {sim_i}")
+            
             # 1 and 2 for each chrom haplotype
             this_ind_tped1 = pd.Series([], dtype=pd.Int8Dtype())
             this_ind_tped2 = pd.Series([], dtype=pd.Int8Dtype())
@@ -370,6 +388,9 @@ if __name__ == '__main__':
     all_input_group.add_argument('--reference-percentages', '-p', required=False, default=None, metavar='60,20,10...',
                                  help='Prefix for the query TPED/TFAM input files (will be normalized to 0 to 1)',
                                  dest="ref_percs", type=str)
+    all_input_group.add_argument('--random-percentages', '-m', required=False,
+                                 help='Given percentages will be ignored and new random percentages will be generated within +-10% range. If you give this flag, please give dummy percentages still, because file checks.',
+                                 dest="random_percs", action='store_true')
     all_input_group.add_argument('--haplotype-file', '-f', required=False, default=None, metavar='<haplotype-file.txt>',
                                  help='Haplotype file containing chr\thap_start\thap_stop',
                                  dest="hap_file", type=str)

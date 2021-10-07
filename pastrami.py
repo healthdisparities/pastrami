@@ -1478,7 +1478,13 @@ class Analysis:
             for ind_id in pop_inds:
                 drop_this_ind = False
                 for col_id in range(len(self.af_header)):
-                    this_z = (self.ancestry_fractions[ind_id][col_id] - this_mean[col_id]) / this_sd[col_id]
+                    this_z = 1.0
+                    if this_sd[col_id] == 0:
+                        #Standard deviation
+                        logging.error(f"Error: Individual id {ind_id} has a standard deviation of {this_sd[col_id]}. This might be the case if your TFAM file did not have an entry for each haplotype of an indvidual. Each individual should have 2 enteries in the TFAM file.")
+                        sys.exit(1)
+                    else:
+                        this_z = (self.ancestry_fractions[ind_id][col_id] - this_mean[col_id]) / this_sd[col_id]
                     # print(f"{ind_id} and {col_id}: {this_z}")
                     if abs(this_z) > 5:
                         drop_this_ind = True

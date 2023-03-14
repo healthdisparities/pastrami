@@ -13,6 +13,7 @@ source:
 requirements:
   build:
     - python>=3.8
+    - plink2
     - setuptools
     - _libgcc_mutex=0.1=conda_forge
     - _openmp_mutex=4.5=2_gnu
@@ -72,6 +73,7 @@ requirements:
     - xz=5.2.6=h166bdaf_0
   run:
     - python>=3.8
+    - plink2
     - _libgcc_mutex=0.1=conda_forge
     - _openmp_mutex=4.5=2_gnu
     - brotlipy=0.7.0=py38h0a891b7_1005

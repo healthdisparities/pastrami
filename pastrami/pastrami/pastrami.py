@@ -1767,7 +1767,7 @@ class Analysis:
     """
 
 
-if __name__ == '__main__':
+def main():
     parser = ArgumentParser(prog=PROGRAM_NAME,
                             add_help=False,
                             description=f'''
@@ -2076,3 +2076,6 @@ if __name__ == '__main__':
     
     # If we're still good, start the actual analysis
     analysis.go()
+
+if __name__ == '__main__':
+    main()

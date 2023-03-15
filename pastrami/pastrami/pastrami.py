@@ -3,7 +3,7 @@
 
 __author__ = "Andrew Conley, Lavanya Rishishwar"
 __copyright__ = "Copyright 2021, Andrew Conley, Lavanya Rishishwar"
-__credits__ = ["Andrew Conely", "Lavanya Rishishwar", "Shivam Sharma", "Emily Norris"]
+__credits__ = ["Andrew Conely", "Lavanya Rishishwar", "Shivam Sharma", "Emily Norris", "Sonali Gupta"]
 __license__ = "GPL"
 __version__ = "0.3"
 __maintainer__ = "Andrew Conley, Lavanya Rishishwar"

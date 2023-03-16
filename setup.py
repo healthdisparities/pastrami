@@ -8,7 +8,7 @@ def readme(file):
   return(long_description_text)
 
 if __name__ == "__main__":
-	setup(name='pastrami', version='0.9.2',description='Pastrami is a novel, scalable computational algorithm for rapid human ancestry estimation at population-, subcontinental- and continental-levels. Pastrami works on two key methodologies: exact haplotype matching and non-negative least square (NNLS) optimization.',
+	setup(name='pastrami', version='0.9.4',description='Pastrami is a novel, scalable computational algorithm for rapid human ancestry estimation at population-, subcontinental- and continental-levels. Pastrami works on two key methodologies: exact haplotype matching and non-negative least square (NNLS) optimization.',
 python_requires='>=3.8',
 zip_safe=False,
 long_description=readme('README.md'),

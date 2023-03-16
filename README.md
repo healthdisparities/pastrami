@@ -2,14 +2,11 @@
 Pastrami is a novel, scalable computational algorithm for rapid human ancestry estimation at population-, subcontinental- and continental-levels.  Pastrami works on two key methodologies: exact haplotype matching and non-negative least square (NNLS) optimization.
 
 Codebase stage: development  
-Developers and maintainers: Andrew Conley, Lavanya Rishishwar, Shivam Sharma, Sonali Gupta  
+Developers and maintainers: Andrew Conley, Lavanya Rishishwar, Shivam Sharma  
 Testers: Lavanya Rishishwar, Shivam Sharma, Emily Norris  
 
 ## Installation
-Recommended installatioon method
-```
-pip install pastrami
-```
+We are working on improving the user experience with Pastrami.  This section will be updated in near future with easier installation procedure for pastrami and it's dependencies.
 
 ### Dependencies
 Pastrami requires the following OS/programs/modules to run:
@@ -18,7 +15,7 @@ Pastrami requires the following OS/programs/modules to run:
 * Python version 3.8 or higher
 * Python libraries = Pathos, numpy, scipy, pandas
 
-#### Plink2 installation
+### Plink2 installation
 Plink2 installation is quite straightforward.  Select the appropriate binary for your processor architecture from this page:https://www.cog-genomics.org/plink/2.0/.  An example installation is shown below for Intel 64-bit architecture:
 ```
 # Download the zip file

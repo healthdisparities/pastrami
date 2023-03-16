@@ -1,0 +1,9 @@
+README.md
+pastrami.py
+setup.py
+pastrami.egg-info/PKG-INFO
+pastrami.egg-info/SOURCES.txt
+pastrami.egg-info/dependency_links.txt
+pastrami.egg-info/not-zip-safe
+pastrami.egg-info/requires.txt
+pastrami.egg-info/top_level.txt

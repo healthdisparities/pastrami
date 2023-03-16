@@ -22,4 +22,5 @@ classifiers = [
       'Programming Language :: Python :: 3.8',
   ],
 scripts = ['pastrami.py'],
+	      py_modules = [],
    )

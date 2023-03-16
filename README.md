@@ -6,7 +6,10 @@ Developers and maintainers: Andrew Conley, Lavanya Rishishwar, Shivam Sharma, So
 Testers: Lavanya Rishishwar, Shivam Sharma, Emily Norris  
 
 ## Installation
-We are working on improving the user experience with Pastrami.  This section will be updated in near future with easier installation procedure for pastrami and it's dependencies.
+Recommended installatioon method
+```
+pip install pastrami
+```
 
 ### Dependencies
 Pastrami requires the following OS/programs/modules to run:

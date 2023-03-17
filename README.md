@@ -13,10 +13,28 @@ conda install -c bioconda pastrami
 ```
 pip install pastrami
 ```
-###Git based installation (not recommended)
+### Git based installation (not recommended)
 
-Assuming Plink/Plink2 is available system-wide, the following commands will install the python modules and clone the git repo
+### Plink2 installation
+Plink2 installation is quite straightforward.  Select the appropriate binary for your processor architecture from this page:https://www.cog-genomics.org/plink/2.0/.  An example installation is shown below for Intel 64-bit architecture:
 ```
+# Download the zip file
+wget http://s3.amazonaws.com/plink2-assets/plink2_linux_x86_64_20210203.zip
+
+# Unzip the zip file
+unzip plink2_linux_x86_64_20210203.zip
+
+# Optionally, create a local bin and add it to your PATH (ignore these steps if you know what you are doing)
+mkdir -p ~/bin
+echo "PATH=$HOME/bin:$PATH" >> ~/.bashrc
+source ~/.bashrc
+
+# Move the file to your local bin
+mv plink2 ~/bin
+
+# Make sure there is an executable by the name plink
+ln -s ~/bin/plink2 ~/bin/plink
+
 # Create a conda environment with Python version = 3.8
 conda create -n pastrami python=3.8
 
@@ -47,44 +65,6 @@ Pastrami requires the following OS/programs/modules to run:
 * Plink2 (recommended over Plink, but both will work) - https://www.cog-genomics.org/plink/2.0/; should be accessibly through $PATH
 * Python version 3.8 or higher
 * Python libraries = Pathos, numpy, scipy, pandas
-
-### Plink2 installation
-Plink2 installation is quite straightforward.  Select the appropriate binary for your processor architecture from this page:https://www.cog-genomics.org/plink/2.0/.  An example installation is shown below for Intel 64-bit architecture:
-```
-# Download the zip file
-wget http://s3.amazonaws.com/plink2-assets/plink2_linux_x86_64_20210203.zip
-
-# Unzip the zip file
-unzip plink2_linux_x86_64_20210203.zip
-
-# Optionally, create a local bin and add it to your PATH (ignore these steps if you know what you are doing)
-mkdir -p ~/bin
-echo "PATH=$HOME/bin:$PATH" >> ~/.bashrc
-source ~/.bashrc
-
-# Move the file to your local bin
-mv plink2 ~/bin
-
-# Make sure there is an executable by the name plink
-ln -s ~/bin/plink2 ~/bin/plink
-```
-
-#### Native pip-based installation
-Assuming Plink/Plink2 is available system-wide, the following commands will install the python modules and clone the git repo
-```
-# Install python modules
-pip install pathos numpy scipy pandas
-
-# Download Pastrami
-git clone https://github.com/healthdisparities/pastrami
-
-# Give it executable permissions
-cd pastrami
-chmod +x pastrami.py
-
-# Run Pastrami
-./pastrami.py
-```
 
 
 ## Quickstart guide

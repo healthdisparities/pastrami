@@ -43,6 +43,8 @@ conda activate pastrami
 
 # Install core packages
 conda install -c conda-forge pathos numpy pandas
+or
+pip install pathos numpy pandas
 
 # Download Pastrami
 git clone https://github.com/healthdisparities/pastrami

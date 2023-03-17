@@ -3,12 +3,43 @@ Pastrami is a novel, scalable computational algorithm for rapid human ancestry e
 
 Codebase stage: development  
 Developers and maintainers: Andrew Conley, Lavanya Rishishwar, Shivam Sharma, Sonali Gupta 
+
 Testers: Lavanya Rishishwar, Shivam Sharma, Emily Norris  
 
-## Recommended installation method
+## Recommended installation methods
 ```
 conda install -c bioconda pastrami
 ```
+```
+pip install pastrami
+```
+###Git based installation (not recommended)
+
+Assuming Plink/Plink2 is available system-wide, the following commands will install the python modules and clone the git repo
+```
+# Create a conda environment with Python version = 3.8
+conda create -n pastrami python=3.8
+
+# Activate the newly created conda environment
+conda activate pastrami
+
+# Install core packages
+conda install -c conda-forge pathos numpy pandas
+
+# Download Pastrami
+git clone https://github.com/healthdisparities/pastrami
+
+# Give it executable permissions
+cd pastrami
+chmod +x pastrami.py
+
+# Run Pastrami
+./pastrami.py
+
+# Deactivate environment, when not using pastrami
+conda deactivate pastrami
+```
+
 
 ### Dependencies
 Pastrami requires the following OS/programs/modules to run:
@@ -55,31 +86,7 @@ chmod +x pastrami.py
 ./pastrami.py
 ```
 
-#### Conda based installation
-Assuming Plink/Plink2 is available system-wide, the following commands will install the python modules and clone the git repo
-```
-# Create a conda environment with Python version = 3.8
-conda create -n pastrami python=3.8
 
-# Activate the newly created conda environment
-conda activate pastrami
-
-# Install core packages
-conda install -c conda-forge pathos numpy pandas
-
-# Download Pastrami
-git clone https://github.com/healthdisparities/pastrami
-
-# Give it executable permissions
-cd pastrami
-chmod +x pastrami.py
-
-# Run Pastrami
-./pastrami.py
-
-# Deactivate environment, when not using pastrami
-conda deactivate pastrami
-```
 ## Quickstart guide
 This section will be populated in near future with small example datasets and commands for analyzing them.
 

@@ -19,10 +19,11 @@ Pastrami requires the following OS/programs/modules to run:
 Plink2 installation is quite straightforward.  Select the appropriate binary for your processor architecture from this page:https://www.cog-genomics.org/plink/2.0/.  An example installation is shown below for Intel 64-bit architecture:
 ```
 # Download the zip file
-wget http://s3.amazonaws.com/plink2-assets/plink2_linux_x86_64_20210203.zip
+# Get the latest version from plink: https://www.cog-genomics.org/plink/2.0/
+wget [http://s3.amazonaws.com/plink2-assets/plink2_linux_x86_64_20210203.zip](https://s3.amazonaws.com/plink2-assets/plink2_linux_x86_64_20240818.zip)
 
 # Unzip the zip file
-unzip plink2_linux_x86_64_20210203.zip
+unzip plink2_linux_x86_64_20240818.zip
 
 # Optionally, create a local bin and add it to your PATH (ignore these steps if you know what you are doing)
 mkdir -p ~/bin

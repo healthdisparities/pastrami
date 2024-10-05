@@ -175,11 +175,11 @@ I prefer to run pastrami the the verbose flag and my hardware can support 20 thr
 1. full_run_estimates.Q: ADMIXTURE-style ancestry fraction estimates at *group level*. This is the output results that you are interested in.
 2. full_run_fine_grain_estimates.Q: ADMIXTURE-style ancestry fraction estimates at *population level*. Population level estimates are generally harder to tease apart and are likely to be less reliable.  These results are aggregated in full_run_estimates.Q file.
 3. full_run.pickle: this is a Python pickle object that stores the processed reference file (consider this as the "database"). Save this file if you'd like to continue query against the same database in future.
-4. full_run_query.tsv: this is your processed query file that can be used.  *This file is not currently being used in any process and will be removed in future.*
-5. full_run.tsv: this is the copying fractions file that contains all the reference and query individuals. *This file is not currently being used in any process and will be removed in future.*
+4. full_run_query.tsv: this is your processed query file that can be used.  *This file is generated only in debug mode.*
+5. full_run.tsv: this is the copying fractions file that contains all the reference and query individuals.
 6. full_run.fam: these are the individuals that were processed as part of this run
-7. full_run_fractions.Q: these are the ancestry fractions (not estimates) from which the final estimates are calculated from. *This file is not currently being used in any process and will be removed in future.*
-8. full_run_paintings.Q: these are the ancestry paintings which are used alongside ancestry fractions to calculate ancestry estimates. *This file is not currently being used in any process and will be removed in future.*
+7. full_run_fractions.Q: these are the ancestry fractions (not estimates) from which the final estimates are calculated from. *This file is generated only in debug mode.*
+8. full_run_paintings.Q: these are the ancestry paintings which are used alongside ancestry fractions to calculate ancestry estimates. *This file is generated only in debug mode.*
 
 
 ### Stepwise execution

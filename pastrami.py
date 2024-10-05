@@ -5,9 +5,8 @@ __author__ = "Andrew Conley, Lavanya Rishishwar"
 __copyright__ = "Copyright 2021, Andrew Conley, Lavanya Rishishwar"
 __credits__ = ["Andrew Conely", "Lavanya Rishishwar", "Shivam Sharma", "Emily Norris"]
 __license__ = "GPL"
-__version__ = "0.3"
+__version__ = "0.4"
 __maintainer__ = "Andrew Conley, Lavanya Rishishwar"
-__email__ = "aconley@ihrc.com; lrishishwar@ihrc.com"
 __status__ = "Development"
 __title__ = "pastrami.py"
 
@@ -352,6 +351,7 @@ class Analysis:
             self.map_dir = opts.map_dir
             self.haplotype_file = opts.haplotypes
             self.pop_group_file = opts.pop_group_file
+            self.debug_mode = opts.debug_mode
             # Outputs to be made
             self.reference_pickle_output_file = None
             self.reference_output_file = None
@@ -557,6 +557,8 @@ class Analysis:
             function()
             if len(self.analysis) == 0:
                 break
+        if not self.debug:
+            self.cleanup()
         # self.pool.terminate()
 
     """ 
@@ -1070,11 +1072,12 @@ class Analysis:
         self.query_copying_fractions -= self.reference_background
         self.query_copying_fractions[self.query_copying_fractions < 0] = 0
         self.query_copying_fractions = self.query_copying_fractions.T.apply(lambda x: x / x.sum()).T
-        logging.info(f"Writing to files {self.query_output_file} and {self.combined_output_file}")
+        logging.info(f"Writing to files {self.query_output_file}")
         self.query_copying_fractions.to_csv(self.query_output_file, sep='\t')
 
         self.combined_copying_fractions = pd.concat([self.reference_copying_fractions, self.query_copying_fractions],
                                                     axis=0)
+        logging.info(f"Writing to files {self.combined_output_file}")
         self.combined_copying_fractions.to_csv(self.combined_output_file, sep='\t')
 
     def chunk_query_reference_copying_fractions(self, chunk_data):
@@ -1770,6 +1773,16 @@ class Analysis:
                 f.write("\n")
         logging.info(f"{outfile} created successfully")
 
+    def cleanup(self):
+        files_to_remove = (self.combined_output_file, 
+                           self.out_prefix + Analysis.ancestry_fraction_postfix,
+                           self.out_prefix + Analysis.ancestry_painting_postfix)
+        for filename in files_to_remove:
+            try:
+                os.remove(filename)
+            except OSError:
+                pass
+
     """ 
         End of class
     """
@@ -1798,13 +1811,15 @@ if __name__ == '__main__':
     all_input_group = all_parser.add_argument_group('Required Input options')
     all_input_group.add_argument('--reference-prefix', required=False, default=None, metavar='<PREFIX>',
                                  help='Prefix for the reference TPED/TFAM input files')
-    all_input_group.add_argument('--query-prefix', required=False, default=None, metavar='<TSV>',
+    all_input_group.add_argument('--query-prefix', required=False, default=None, metavar='<TPED/TFAM>',
                                  help='Prefix for the query TPED/TFAM input files')
-    all_input_group.add_argument('--haplotypes', required=False, default=None, metavar='<TSV>',
+    all_input_group.add_argument('--haplotypes', required=False, default=None, metavar='<TPED/TFAM>',
                                  help='File of haplotype positions')
     all_input_group.add_argument('--pop-group', required=False, default=None, metavar='pop2group.txt', type=str,
                                  help='File containing population to group (e.g., tribes to region) mapping',
                                  dest="pop_group_file")
+    all_input_group.add_argument('--debug_mode', action='store_true', dest="debug_mode", default=False,
+                                 help='Should all debugging file be produced in the output')
 
     # Add build output arguments
     all_output_group = all_parser.add_argument_group('Output options')

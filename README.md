@@ -64,7 +64,10 @@ conda create -n pastrami python=3.8
 conda activate pastrami
 
 # Install core packages
-conda install -c conda-forge pathos numpy pandas
+conda install -c conda-forge pathos numpy pandas r-base
+
+# Install R packages
+Rscript -e 'install.packages("optparse", repos="https://cloud.r-project.org")'
 
 # Download Pastrami
 git clone https://github.com/healthdisparities/pastrami

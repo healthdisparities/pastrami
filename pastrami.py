@@ -14,7 +14,7 @@ __title__ = "pastrami.py"
 # Standard modules
 import logging
 import math
-import os.path
+import os
 import pickle
 import random
 import re
@@ -274,6 +274,7 @@ class Analysis:
     error_threshold = 1e-8
     optim_iterations = 10
     tolerance = 1e-8
+    optimizer_script = os.path.join(os.path.dirname(os.path.realpath(__file__)), "outsourcedOptimizer.R")
     ancestry_fraction_postfix = "_fractions.Q"
     ancestry_painting_postfix = "_paintings.Q"
     pop_estimates_postfix = "_estimates.Q"
@@ -536,13 +537,14 @@ class Analysis:
                 pop_group_file                =  {self.pop_group_file}
                 ancestry_infile               =  {self.ancestry_infile}
                 fam_infile                    =  {self.fam_infile}
+                optimizer_location            =  {self.optimizer_script}
         """
         return long_string
 
     # TODO: Print a summary of what parameters were provided, what needs to be performed
     def summarize_run(self):
         logging.info(self.main_process_color + str(self) + Colors.ENDC)
-        logging.info(self.main_process_color + f"Analysis to perform: " + ",".join(self.analysis) + Colors.ENDC)
+        logging.info(self.main_process_color + f"Analysis to perform: " + ", ".join(self.analysis) + Colors.ENDC)
 
     def go(self):
         self.summarize_run()
@@ -788,10 +790,11 @@ class Analysis:
 
         # Read the thing and remove the temporary files
         chromosome_tped_file = chromosome_file_prefix + '.tped'
-        chromosome_tped = pd.read_table(chromosome_tped_file, index_col=None, header=None, sep=' ').iloc[:, 4::2]
+        # logging.info(f"Reading in {chromosome_tped_file}")
+        chromosome_tped = pd.read_table(chromosome_tped_file, index_col=None, header=None, sep='\t').iloc[:, 4::2]
 
         # TODO: Move this to Python's rm command?
-        command = ['rm'] + [chromosome_file_prefix + '.' + i for i in ['tped', 'tfam', 'nosex', 'log']]
+        command = ['rm'] + [chromosome_file_prefix + '.' + i for i in ['tped', 'tfam', 'log']]
 
         # TODO: Move the command to Support.run_command
         # Support.run_command(command_list=command)
@@ -816,6 +819,7 @@ class Analysis:
         # self.pool.join()
         # self.pool.terminate()
         Support.safe_dir_rm(temp_name)
+        # import pdb; pdb.set_trace()
         for i in range(len(self.chromosomes)):
             self.reference_tpeds[str(self.chromosomes[i])] = results[i]
             self.reference_tpeds[str(self.chromosomes[i])].columns = self.reference_individuals
@@ -846,6 +850,7 @@ class Analysis:
 
     def build_reference_set(self):
         # Load up the reference data
+        logging.info("Building reference set")
         self.load_haplotypes()
         self.load_reference_tfam()
         self.load_reference_tpeds()
@@ -1632,7 +1637,7 @@ class Analysis:
         #Outosurcing the same information to an R optimizer. 
         #R optimizer gives us more accurate optimization results.
         logging.info(f"Optimizing the same estimates using an outsourced R optimizer.")
-        outsourcing_command_list = ["Rscript", "outsourcedOptimizer.R", "-p", self.out_prefix + Analysis.ancestry_painting_postfix,
+        outsourcing_command_list = ["Rscript", self.optimizer_script, "-p", self.out_prefix + Analysis.ancestry_painting_postfix,
                                "-f",  self.out_prefix + Analysis.ancestry_fraction_postfix,
                                "-o", self.out_prefix + Analysis.outsourced_optimizer_pop_estimates_postfix]
         

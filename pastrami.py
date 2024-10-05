@@ -938,7 +938,8 @@ class Analysis:
 
         chunk_reference_individual_counts = pd.DataFrame(0,
                                                          index=self.reference_individuals,
-                                                         columns=self.reference_populations)
+                                                         columns=self.reference_populations,
+                                                         dtype=float)
 
         # print('Found', chunk_haplotypes.shape[0], 'haplotypes for this chunk')
         # print('Found', len(chunk_haplotypes), 'corresponding genotype sets')
@@ -968,7 +969,8 @@ class Analysis:
             # Find the counts of each haplotype in each population
             distinct_haplotypes = haplotype_strings.unique()
             haplotype_counts_with_zeroes = pd.DataFrame(0, index=distinct_haplotypes,
-                                                        columns=self.reference_populations)
+                                                        columns=self.reference_populations,
+                                                        dtype=int)
             haplotype_counts_with_zeroes.loc[haplotype_counts.index, haplotype_counts.columns] += haplotype_counts
             haplotype_counts = haplotype_counts_with_zeroes
             # print(haplotype_counts.shape)
@@ -1081,7 +1083,8 @@ class Analysis:
 
         chunk_query_individual_fractions = pd.DataFrame(0,
                                                         index=self.query_individuals,
-                                                        columns=self.reference_populations)
+                                                        columns=self.reference_populations,
+                                                        dtype=float)
 
         # For each haplotype, get all of the counts for each individual
         for haplotype in range(len(chunk_haplotypes)):
@@ -1118,7 +1121,7 @@ class Analysis:
         # pool = mp.Pool(processes=self.threads)
         # self.pool.restart()
         # For memory GIL BS, run each chromosome on its own
-        copying_counts = pd.DataFrame(0, index=self.reference_individuals, columns=self.reference_individuals)
+        copying_counts = pd.DataFrame(0, index=self.reference_individuals, columns=self.reference_individuals, dtype=int)
         haplotype_counts = pd.Series([0] * len(self.reference_individuals), index=self.reference_individuals)
 
         # TODO: This can potentially be parallelized
@@ -1227,7 +1230,7 @@ class Analysis:
             # Find the counts of each haplotype across all of the individuals, adding in 0's
             distinct_haplotypes = haplotype_strings.unique()
             haplotype_counts_with_zeroes = pd.DataFrame(0, index=distinct_haplotypes,
-                                                        columns=self.reference_individuals)
+                                                        columns=self.reference_individuals, dtype=int)
             haplotype_counts_with_zeroes.loc[haplotype_counts.index, haplotype_counts.columns] += haplotype_counts
             haplotype_counts = haplotype_counts_with_zeroes
 

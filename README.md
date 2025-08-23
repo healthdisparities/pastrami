@@ -220,4 +220,5 @@ Yoruba        Nigerian
 ```
 The whitespace separating the column is tab (shown as spaces here for formatting reasons).  Any lines starting with # are ignored.
 
-
+## Toy example
+To test out Pastrami, toy example is provided in this git repo: https://github.com/healthdisparities/pastrami_example

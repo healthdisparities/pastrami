@@ -222,3 +222,7 @@ The whitespace separating the column is tab (shown as spaces here for formatting
 
 ## Toy example
 To test out Pastrami, toy example is provided in this git repo: https://github.com/healthdisparities/pastrami_example
+
+## Publications
+
+Conley AB, Rishishwar L, Sharma S, Norris ET, Jordan IK, Mariño-Ramírez L. Pastrami: a fast and efficient algorithm for fine-scale genetic ancestry inference. NAR Genomics and Bioinformatics, Volume 7, Issue 4, December 2025. lqaf184. doi: 10.1093/nargab/lqaf184 [[PubMed]](https://pubmed.ncbi.nlm.nih.gov/41446504/) [[Article]](https://academic.oup.com/nargab/article-pdf/7/4/lqaf184/66114173/lqaf184.pdf)
